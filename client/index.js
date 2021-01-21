@@ -1,21 +1,26 @@
-// @dev need to manually update fromBlock for now
-require("dotenv").config();
-const Web3 = require("web3");
-var web3 = new Web3(`https://mainnet.infura.io/v3/${process.env.INFURA_KEY}`);
-
-// some kind of "parent" contract
-var instance_8419;
-var instance_8419Address = "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419";
-
-// aggregator that emits ETH-USD events
-var instance_5446;
-var instance_5446Address = "0x00c7a37b03690fb9f41b5c5af8131735c7275446";
-
-var testingUser;
-
-// var botContractAddress = "";
-
 $(document).ready(async function () {
+  // @dev need to manually update fromBlock for now
+  require("dotenv").config();
+  const Web3 = require("web3");
+  const web3 = new Web3(
+    `https://mainnet.infura.io/v3/${process.env.INFURA_KEY}`
+  );
+  const web3Socket = new Web3(
+    `wss://mainnet.infura.io/ws/v3/${process.env.INFURA_KEY}`
+  );
+
+  // some kind of "parent" contract
+  var instance_8419;
+  var instance_8419Address = "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419";
+
+  // aggregator that emits ETH-USD events
+  var instance_5446;
+  var instance_5446Address = "0x00c7a37b03690fb9f41b5c5af8131735c7275446";
+
+  var testingUser;
+
+  // var botContractAddress = "";
+
   var accounts = await window.ethereum.enable();
 
   // "parent" instance
@@ -27,6 +32,15 @@ $(document).ready(async function () {
   instance_5446 = new web3.eth.Contract(abi_5446, instance_5446Address, {
     from: accounts[0],
   });
+
+  // aggregator instance
+  instance_5446_websocket = new web3Socket.eth.Contract(
+    abi_5446,
+    instance_5446Address,
+    {
+      from: accounts[0],
+    }
+  );
 
   testingUser = accounts[0];
 
@@ -46,13 +60,17 @@ $(document).ready(async function () {
   });
 
   // aggregator instance trying to subscribe (but doesn't seem to work yet)
-  instance_5446.events.AnswerUpdated().on("data", async function (event) {
-    console.log("instance_5446 event");
-    console.log(event);
-    const EthPrice_5446 = await instance_5446.methods.latestAnswer().call();
-    console.log("EthPrice_5446");
-    console.log(String(EthPrice_5446));
-  });
+  instance_5446_websocket.events
+    .AnswerUpdated()
+    .on("data", async function (event) {
+      console.log("instance_5446_websocket event");
+      console.log(event);
+      const EthPrice_5446_websocket = await instance_5446.methods
+        .latestAnswer()
+        .call();
+      console.log("EthPrice_5446_websocket");
+      console.log(String(EthPrice_5446_websocket));
+    });
 
   // aggregator instance
   // querying for all price updates on ETH-USD since "fromBlock:"

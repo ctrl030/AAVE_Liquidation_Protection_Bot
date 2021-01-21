@@ -1,4 +1,7 @@
 .env
-/cache
-/client
-/contracts
+.vscode
+node_modules/
+cache/
+build/
+artifacts/
+package-lock.json
