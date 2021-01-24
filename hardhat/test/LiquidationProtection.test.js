@@ -4,6 +4,7 @@ const fs = require('fs');
 
 const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 const LENDING_POOL = "0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9";
+const DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
 
 describe('LiquidationProtection', () => {
   let lendingPool;
@@ -11,8 +12,7 @@ describe('LiquidationProtection', () => {
   let wETHGateway;
 
   let owner;
-  let addr1;
-  let addr2;
+  let user;
   let addrs;
 
   before(async () => {
@@ -22,7 +22,7 @@ describe('LiquidationProtection', () => {
     wETH = readABI('WETH9.json', WETH);
     wETHGateway = readABI('WETHGateway.json', "0xDcD33426BA191383f1c9B431A342498fdac73488");
 
-    [owner, addr1, addr2, ...addrs] = await accountsPromise;
+    [owner, user, ...addrs] = await accountsPromise;
   });
 
   let protection;
@@ -45,14 +45,14 @@ describe('LiquidationProtection', () => {
 
   it('wraps eth', async () => {
     let result = await wETH.methods.deposit().send({
-      from: addr1.address, value: amount
+      from: user.address, value: amount
     });
-    await testHelper.connect(addr1).assertWEth(amount);
+    await testHelper.connect(user).assertWEth(amount);
   });
 
   it ('approves LendingPool contract', async() => {
     let result = await wETH.methods.approve(LENDING_POOL, amount).send({
-      from:  addr1.address,
+      from: user.address,
     });
     expect(result.events.Approval).to.be.ok;
   });
@@ -60,15 +60,21 @@ describe('LiquidationProtection', () => {
   it('deposits into LendingPool', async() => {
     await testHelper.assertPaused(false);
 
-    let result = await lendingPool.methods.deposit(WETH, amount, addr1.address, 0).send({
-      from:  addr1.address,
+    let result = await lendingPool.methods.deposit(WETH, amount, user.address, 0).send({
+      from: user.address,
     });
 
     expect(result.events.Deposit).to.be.ok;
-    await testHelper.connect(addr1).assertAEth(amount);
+    await testHelper.connect(user).assertAEth(amount);
   });
 
-  it('takes a loan', async() => {
+  it('borrows DAI', async() => {
+    let borrowAmount = String(amount / 2);
+    let result = await lendingPool.methods.borrow(DAI, borrowAmount, 1, 0, user.address).send({
+       from: user.address,
+    });
+    expect(result.status).to.be.ok;
+    await testHelper.connect(user).assertDAI(borrowAmount);
   });
 });
 
