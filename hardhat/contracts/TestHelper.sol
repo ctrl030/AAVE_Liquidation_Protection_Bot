@@ -45,6 +45,21 @@ contract TestHelper {
     require(dai == amount);
   }
 
+  function printUserAccountData(address user) public {
+    (bool s, bytes memory value) = LENDING_POOL.call(
+      abi.encodeWithSignature("getUserAccountData(address)", user));
+    require(s);
+    (uint totalCollateralETH, uint totalDebtETH, uint availableBorrowsETH,
+     uint currentLiquidationThreshold, uint ltv, uint healthFactor) = abi.decode(
+      value, (uint, uint, uint, uint, uint, uint));
+    console.log("totalCollateralETH=", totalCollateralETH);
+    console.log("totalDebtETH=", totalDebtETH);
+    console.log("availableBorrowsETH=", availableBorrowsETH);
+    console.log("currentLiquidationThreshold=", currentLiquidationThreshold);
+    console.log("ltv=", ltv);
+    console.log("healthFactor=", healthFactor);
+  }
+
   function printReservesList() public {
     (bool s, bytes memory value) = LENDING_POOL.call(
       abi.encodeWithSignature("getReservesList()"));

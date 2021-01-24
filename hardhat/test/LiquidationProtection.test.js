@@ -45,7 +45,7 @@ describe('LiquidationProtection', () => {
 
   it('wraps eth', async () => {
     let result = await wETH.methods.deposit().send({
-      from: user.address, value: amount
+      from: user.address, value: amount,
     });
     await testHelper.connect(user).assertWEth(amount);
   });
@@ -68,8 +68,22 @@ describe('LiquidationProtection', () => {
     await testHelper.connect(user).assertAEth(amount);
   });
 
+  it ('cannot borrow too much DAI', async() => {
+    let borrowAmount = "1300000000000000000000";
+    let gotError;
+    try {
+      await lendingPool.methods.borrow(DAI, borrowAmount, 1, 0, user.address).send({
+         from: user.address,
+      });
+      throw null;
+    } catch (error) {
+      gotError = error;
+    }
+    expect(gotError).to.be.ok;
+  });
+
   it('borrows DAI', async() => {
-    let borrowAmount = String(amount / 2);
+    let borrowAmount = "1001000000000000000000";
     let result = await lendingPool.methods.borrow(DAI, borrowAmount, 1, 0, user.address).send({
        from: user.address,
     });
