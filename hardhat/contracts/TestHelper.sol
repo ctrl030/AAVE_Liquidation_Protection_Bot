@@ -13,20 +13,35 @@ contract TestHelper {
   address constant AETH = 0x030bA81f1c18d280636F32af80b9AAd02Cf0854e;
   address constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
 
+  event TestEvent(uint amount);
+
   function assertWEth(uint want) public {
     (bool s, bytes memory value) = WETH9.call(
       abi.encodeWithSignature("balanceOf(address)", msg.sender));
     require(s);
     uint wEth = abi.decode(value, (uint));
     require(wEth == want);
+
   }
 
-  function assertAEth(uint atLeast) public {
+  function assertAEth(uint atLeast) public returns (uint) {
     (bool s, bytes memory value) = AETH.call(
       abi.encodeWithSignature("balanceOf(address)", msg.sender));
     require(s);
     uint aEth = abi.decode(value, (uint));
     require(aEth >= atLeast);  // Amount could be greater due to interest payments.
+
+    emit TestEvent(aEth);
+    return aEth;
+  }
+
+  function assertAEthAllowance(address owner, address spender, uint atLeast) public {
+    (bool s, bytes memory value) = AETH.call(
+      abi.encodeWithSignature("allowance(address,address)", owner, spender));
+    require(s, "error getting allowance");
+    uint amount = abi.decode(value, (uint));
+    console.log("allowance=", amount);
+    require(amount >= atLeast, "amount less than requested");
   }
 
   function assertPaused(bool want) public {
@@ -76,5 +91,14 @@ contract TestHelper {
     require(s);
     uint mask = abi.decode(value, (uint));
     console.log(mask);
+  }
+
+  function assertAllowance(address asset, address owner, address spender, uint atLeast) public {
+    (bool s, bytes memory value) = asset.call(
+      abi.encodeWithSignature("allowance(address,address)", owner, spender));
+    require(s, "error getting allowance");
+    uint amount = abi.decode(value, (uint));
+    console.log(amount);
+    require(amount >= atLeast);
   }
 }
