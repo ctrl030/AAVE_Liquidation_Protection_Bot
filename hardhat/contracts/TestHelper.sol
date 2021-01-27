@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: agpl-3.0
-pragma solidity 0.7.3;
+pragma solidity 0.6.12;
+pragma experimental ABIEncoderV2;
 
 import "hardhat/console.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // Since Javascript tests only observe a transaction hash when functions are called, they cannot
 // observe any on-chain values. This class contains helper functions that call on-chain methods and
@@ -13,50 +15,31 @@ contract TestHelper {
   address constant AETH = 0x030bA81f1c18d280636F32af80b9AAd02Cf0854e;
   address constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
 
-  event TestEvent(uint amount);
-
-  function assertWEth(uint want) public {
-    (bool s, bytes memory value) = WETH9.call(
-      abi.encodeWithSignature("balanceOf(address)", msg.sender));
-    require(s);
-    uint wEth = abi.decode(value, (uint));
-    require(wEth == want);
-
+  function assertWEth(uint want) public view {
+    uint wETH = IERC20(WETH9).balanceOf(msg.sender);
+    require(wETH == want);
   }
 
-  function assertAEth(uint atLeast) public returns (uint) {
-    (bool s, bytes memory value) = AETH.call(
-      abi.encodeWithSignature("balanceOf(address)", msg.sender));
-    require(s);
-    uint aEth = abi.decode(value, (uint));
+  function assertAEth(uint atLeast) public view {
+    uint aEth = IERC20(AETH).balanceOf(msg.sender);
     require(aEth >= atLeast);  // Amount could be greater due to interest payments.
-
-    emit TestEvent(aEth);
-    return aEth;
   }
 
-  function assertAEthAllowance(address owner, address spender, uint atLeast) public {
-    (bool s, bytes memory value) = AETH.call(
-      abi.encodeWithSignature("allowance(address,address)", owner, spender));
-    require(s, "error getting allowance");
-    uint amount = abi.decode(value, (uint));
+  function assertAEthAllowance(address owner, address spender, uint atLeast) public view {
+    uint amount = IERC20(AETH).allowance(owner, spender);
     console.log("allowance=", amount);
     require(amount >= atLeast, "amount less than requested");
   }
 
   function assertPaused(bool want) public {
-    (bool s, bytes memory value)  = LENDING_POOL.call(
-      abi.encodeWithSignature("paused()"));
+    (bool s, bytes memory value)  = LENDING_POOL.call(abi.encodeWithSignature("paused()"));
     require(s);
     bool paused = abi.decode(value, (bool));
     require(paused == want);
   }
 
-  function assertDAI(uint amount) public {
-    (bool s, bytes memory value) = DAI.call(
-      abi.encodeWithSignature("balanceOf(address)", msg.sender));
-    require(s);
-    uint dai = abi.decode(value, (uint));
+  function assertDAI(uint amount) public view {
+    uint dai = IERC20(DAI).balanceOf(msg.sender);
     require(dai == amount);
   }
 
@@ -93,11 +76,9 @@ contract TestHelper {
     console.log(mask);
   }
 
-  function assertAllowance(address asset, address owner, address spender, uint atLeast) public {
-    (bool s, bytes memory value) = asset.call(
-      abi.encodeWithSignature("allowance(address,address)", owner, spender));
-    require(s, "error getting allowance");
-    uint amount = abi.decode(value, (uint));
+  function assertAllowance(address asset, address owner, address spender, uint atLeast)
+      public view {
+    uint amount = IERC20(asset).allowance(owner, spender);
     console.log(amount);
     require(amount >= atLeast);
   }

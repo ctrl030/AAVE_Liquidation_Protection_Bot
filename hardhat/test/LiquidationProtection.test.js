@@ -1,6 +1,9 @@
 const { expect } = require("chai");
 const path = require('path');
 const fs = require('fs');
+const bent = require('bent')
+const getJSON = bent('json')
+const convertHex = require('convert-hex')
 
 const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 const LENDING_POOL = "0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9";
@@ -13,7 +16,6 @@ const MAX_UINT_AMOUNT =
 describe('LiquidationProtection', () => {
   let lendingPool;
   let wETH;
-  let wETHGateway;
   let aToken;
 
   let owner;
@@ -28,7 +30,6 @@ describe('LiquidationProtection', () => {
 
     lendingPool = readABI('LendingPool.json', LENDING_POOL);
     wETH = readABI('WETH9.json', WETH);
-    wETHGateway = readABI('WETHGateway.json', "0xDcD33426BA191383f1c9B431A342498fdac73488");
     aToken = readABI('AToken.json', AETH);
 
     [owner, user, ...addrs] = await accountsPromise;
@@ -51,28 +52,23 @@ describe('LiquidationProtection', () => {
     let result = await wETH.methods.deposit().send({
       from: user.address, value: amount,
     });
-    expect(result.status).to.be.ok;
+    expect(result.events.Deposit).to.be.ok;
 
-    let result2 = await (await testHelper.connect(user).assertWEth(amount)).wait();
-    expect(result2.status).to.be.ok;
+    await testHelper.connect(user).assertWEth(amount);
   });
 
-  it ('approves LendingPool contract', async() => {
+  it('deposits into LendingPool', async() => {
     let result = await wETH.methods.approve(LENDING_POOL, amount).send({
       from: user.address,
     });
     expect(result.events.Approval).to.be.ok;
-  });
 
-  it('deposits into LendingPool', async() => {
-    let result = await lendingPool.methods.deposit(WETH, amount, user.address, 0).send({
+    result = await lendingPool.methods.deposit(WETH, amount, user.address, 0).send({
       from: user.address,
     });
-
     expect(result.events.Deposit).to.be.ok;
 
-    result = await (await testHelper.connect(user).assertAEth(amount)).wait();
-    expect(result.status).to.be.ok;
+    await testHelper.connect(user).assertAEth(amount);
   });
 
   it ('cannot borrow too much DAI', async() => {
@@ -90,13 +86,13 @@ describe('LiquidationProtection', () => {
   });
 
   it('borrows DAI', async() => {
-    let borrowAmount = "1001000000000000000000";
+    let borrowAmount = "801000000000000000000";
     let result = await lendingPool.methods.borrow(DAI, borrowAmount, 1, 0, user.address).send({
        from: user.address,
     });
     expect(result.status).to.be.ok;
-    let result2 = await (await testHelper.connect(user).assertDAI(borrowAmount)).wait();
-    expect(result2.status).to.be.ok;
+
+    await testHelper.connect(user).assertDAI(borrowAmount);
   });
 
   it('registers for protection', async() => {
@@ -110,6 +106,38 @@ describe('LiquidationProtection', () => {
     // 2. The user then registers with the protection contract.
     result = await (await protection.connect(user).register(WETH, DAI, 0)).wait();
     expect(result.events[0].event).to.equal('ProtectionRegistered');
+  });
+
+  let oneInchSwapCalldata;
+
+  it ('obtains calldata', async() => {
+    let result = await getJSON(`https://api.1inch.exchange/v2.0/swap?fromTokenAddress=${WETH}&toTokenAddress=${DAI}&amount=${amount}&fromAddress=${protection.address}&slippage=0.5&disableEstimate=true`);
+    oneInchSwapCalldata = result.tx.data;
+    expect(oneInchSwapCalldata).to.be.ok;
+  });
+
+  /**
+   *  // TODO(greatfilter): the swap here is flaky. It should be debugged.
+  it ('can 1inch swap', async() => {
+    let result = await wETH.methods.deposit().send({
+      from: owner.address, value: amount,
+    });
+    expect(result.events.Deposit).to.be.ok;
+
+    result = await wETH.methods.transfer(protection.address, amount).send({
+      from: owner.address,
+    });
+    expect(result.events.Transfer).to.be.ok;
+
+    result = await (await protection.oneInchSwap(WETH,
+        convertHex.hexToBytes(oneInchSwapCalldata))).wait();
+    expect(result.status).to.be.ok;
+  }); */
+
+  it ('executes', async() => {
+    let result = await (await protection.connect(owner).execute(
+        user.address, convertHex.hexToBytes(oneInchSwapCalldata))).wait();
+    expect(result.status).to.be.ok;
   });
 });
 
