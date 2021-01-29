@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math/big"
 	"net/http"
@@ -31,6 +33,10 @@ const (
 	// ethURI = "wss://mainnet.infura.io/ws/v3/92e15d2bbf9b41d286544a680c4b23d0"
 	// ethURI = "wss://goerli.infura.io/ws/v3/92e15d2bbf9b41d286544a680c4b23d0"
 	ethURI = "ws://localhost:8545"
+
+	// The keys here appear to be stable values used by local hardhat nodes.
+	botKey  = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+	userKey = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
 )
 
 var (
@@ -69,7 +75,7 @@ func main() {
 
 	ctx := context.Background()
 
-	bot, err := wallets.NewWallet("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+	bot, err := wallets.NewWallet(botKey)
 	if err != nil {
 		log.Fatalf("Failed to create wallet: %v", err)
 	}
@@ -101,7 +107,7 @@ func main() {
 		log.Fatalf("Error creating aETH client: %v", err)
 	}
 
-	user, err := wallets.NewWallet("59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d")
+	user, err := wallets.NewWallet(userKey)
 	if err != nil {
 		log.Fatalf("Error creating user wallet: %v", err)
 	}
@@ -213,20 +219,24 @@ func executeProtection(ctx context.Context, eth *ethclient.Client, aETH *erc20.E
 
 	res, err := oneInchClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("performing oneInch request: %w", err)
+		return fmt.Errorf("performing 1inch request: %w", err)
 	}
 	if res.Body != nil {
 		defer res.Body.Close()
 	}
+	content, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("reading 1inch response: %w", err)
+	}
 
 	var parsed interface{}
-	if err = json.NewDecoder(res.Body).Decode(&parsed); err != nil {
-		return fmt.Errorf("decoding oneInch response: %w", err)
+	if err = json.NewDecoder(bytes.NewReader(content)).Decode(&parsed); err != nil {
+		return fmt.Errorf("decoding 1inch response %s: %w", content, err)
 	}
 	calldataHex := parsed.(map[string]interface{})["tx"].(map[string]interface{})["data"].(string)
 	calldata, err := hex.DecodeString(calldataHex[2:])
 	if err != nil {
-		return fmt.Errorf("decoding oneinch calldata: %w", err)
+		return fmt.Errorf("decoding 1inch calldata %s: %w", content, err)
 	}
 
 	if err = bot.Execute(ctx, eth, "executing protection",
