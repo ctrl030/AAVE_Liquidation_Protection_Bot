@@ -2,9 +2,10 @@
 pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
-import "hardhat/console.sol";
+// import "hardhat/console.sol";
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+// import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "../node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import "../flashloan/interfaces/IFlashLoanReceiver.sol";
 import "../interfaces/ILendingPool.sol";
@@ -121,8 +122,8 @@ contract LiquidationProtection is IFlashLoanReceiver {
       bytes calldata _params) external override returns (bool) {
     (FlashParams memory fp, bytes memory oneInchSwapCalldata)
         = abi.decode(_params, (FlashParams, bytes));
-    require(IERC20(fp.debtAsset).approve(0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9,
-        type(uint).max), 'failed to approve the lending pool');
+    require(IERC20(fp.debtAsset).approve(LENDING_POOL_ADDRESS, type(uint).max),
+        'failed to approve the lending pool');
     uint repaid = 0;
     if (fp.sAmount > 0) {
       repaid += LENDING_POOL.repay(fp.debtAsset, fp.sAmount, 1, fp.user);
