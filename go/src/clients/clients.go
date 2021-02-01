@@ -242,7 +242,7 @@ func (c *Client) PriceOf(ctx context.Context, addr string) (*big.Int, *big.Int, 
 	return price, decFactor, nil
 }
 
-// DepositETH deposits ETH into the lending pool from the given wallet.
+// DepositETH deposits ETH into the lending pool from the given wallet. Used for testing.
 func (c *Client) DepositETH(ctx context.Context, from *wallets.Wallet, amount *big.Int) error {
 	txr, err := from.NewTransactor(ctx, c.eth)
 	if err != nil {
@@ -278,7 +278,7 @@ func (c *Client) DepositETH(ctx context.Context, from *wallets.Wallet, amount *b
 	return nil
 }
 
-// Borrow borrows the given asset on behalf of the given wallet using at the stable rate.
+// Borrow borrows the given asset for the given wallet at the stable rate. Used for testing.
 func (c *Client) Borrow(ctx context.Context, onBehalfOf *wallets.Wallet, asset common.Address, amount *big.Int) error {
 	return c.Execute(ctx, onBehalfOf, fmt.Sprintf("borrowing %v", asset),
 		func(txr *bind.TransactOpts) (*types.Transaction, error) {

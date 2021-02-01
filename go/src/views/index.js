@@ -1,3 +1,6 @@
+import React from 'react';
+import ReactDOM from 'react-dom';
+
 function isHexAddress(str) {
   return /^0x[a-fA-F0-9]{40}$/i.test(str)
 }
@@ -12,8 +15,6 @@ const emptyValues = {
   'current-ratio': '',
   'liquidation-threshold': '',
 };
-
-const etherscanUri = 'https://etherscan.io/address/';
 
 class AddressInput extends React.Component {
   constructor(props) {
@@ -102,7 +103,7 @@ class ProtectionWidget extends React.Component {
       return <td />;
     }
     return (<td>
-       <a href={etherscanUri.concat(addr)}>{addr}</a>
+       <a href={'https://etherscan.io/address/'.concat(addr)}>{addr}</a>
     </td>);
   }
 }

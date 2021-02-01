@@ -91,7 +91,7 @@ func main() {
 
 	// Serves ./views using gin.
 	router := gin.Default()
-	router.Use(static.Serve("/", static.LocalFile("./views", true)))
+	router.Use(static.Serve("/", static.LocalFile("./views/dist", true)))
 
 	var contractAddress common.Address
 	var p *protection.Protection
