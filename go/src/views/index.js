@@ -41,9 +41,7 @@ class ProtectionWidget extends React.Component {
   constructor(props) {
     super(props);
 
-    this.connectClicked.bind(this);
     this.state = emptyValues;
-    this.setState.bind(this);
   }
 
   render() {
