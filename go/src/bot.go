@@ -20,13 +20,14 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/gin-gonic/contrib/static"
+	"github.com/gin-gonic/gin"
 
 	"abis"
+	"clients"
 	"erc20"
-	"lendingpool"
 	"protection"
 	"wallets"
-	"weth9"
 )
 
 const (
@@ -43,9 +44,12 @@ var (
 	// ethUSDAggregator is the Aggregator proxied by 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419.
 	ethUSDAggregator = common.HexToAddress("0x00c7A37B03690fb9f41b5C5AF8131735C7275446")
 	// btcUSDAggregator is the Aggregator proxied by 0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c.
-	btcUSDAggregator   = common.HexToAddress("0xF570deEffF684D964dc3E15E1F9414283E3f7419")
-	wETH9Address       = common.HexToAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-	daiAddress         = common.HexToAddress("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+	btcUSDAggregator = common.HexToAddress("0xF570deEffF684D964dc3E15E1F9414283E3f7419")
+	wETH9Address     = common.HexToAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+	daiAddress       = common.HexToAddress("0x6B175474E89094C44Da98b954EedeAC495271d0F")
+	// This is the proxy address for tusd. The implementation address is:
+	// 0xffc40F39806F1400d8278BfD33823705b5a4c196. Not sure which one AAVE uses.
+	tusdAddress        = common.HexToAddress("0x0000000000085d4780B73119b644AE5ecd22b376")
 	aETHAddress        = common.HexToAddress("0x030bA81f1c18d280636F32af80b9AAd02Cf0854e")
 	lendingPoolAddress = common.HexToAddress("0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9")
 
@@ -56,6 +60,12 @@ var (
 			"&disableEstimate=true"))
 
 	loanAmount *big.Int
+
+	ethAggregators = map[common.Address]common.Address{
+		daiAddress: common.HexToAddress("0xd866A07Dea5Ee3c093e21d33660b5579C21F140b"),
+		// Proxied by 0x3886BA987236181D98F2401c507Fb8BeA7871dF2.
+		tusdAddress: common.HexToAddress("0x0c632eC5982e3A8dC116a02ebA7A419efec170B1"),
+	}
 )
 
 func init() {
@@ -67,44 +77,32 @@ func init() {
 }
 
 func main() {
-	eth, err := ethclient.Dial(ethURI)
+	client, err := clients.NewClient(&clients.Params{
+		ETHURI:             ethURI,
+		BotKey:             botKey,
+		WETH9Address:       wETH9Address,
+		LendingPoolAddress: lendingPoolAddress,
+	})
 	if err != nil {
-		log.Fatalf("Error dialing %s: %v", ethURI, err)
+		log.Fatalf("Error creating client: %v", err)
 	}
-	defer eth.Close()
 
 	ctx := context.Background()
 
-	bot, err := wallets.NewWallet(botKey)
-	if err != nil {
-		log.Fatalf("Failed to create wallet: %v", err)
-	}
+	// Serves ./views using gin.
+	router := gin.Default()
+	router.Use(static.Serve("/", static.LocalFile("./views", true)))
 
 	var contractAddress common.Address
 	var p *protection.Protection
-	if err = bot.Execute(ctx, eth, "deploying protection contract",
+	if err := client.ExecuteAsBot(ctx, "deploying protection contract",
 		func(txr *bind.TransactOpts) (*types.Transaction, error) {
 			var tx *types.Transaction
 			var err error
-			contractAddress, tx, p, err = protection.DeployProtection(txr, eth)
+			contractAddress, tx, p, err = protection.DeployProtection(txr, client.ETH())
 			return tx, err
 		}); err != nil {
 		log.Fatalf("Error: %v", err)
-	}
-
-	wETH, err := weth9.NewWeth9(wETH9Address, eth)
-	if err != nil {
-		log.Fatalf("Error creating WETH client: %v", err)
-	}
-
-	lp, err := lendingpool.NewLendingpool(lendingPoolAddress, eth)
-	if err != nil {
-		log.Fatalf("Error creating LendingPool client: %v", err)
-	}
-
-	aETH, err := erc20.NewErc20(aETHAddress, eth)
-	if err != nil {
-		log.Fatalf("Error creating aETH client: %v", err)
 	}
 
 	user, err := wallets.NewWallet(userKey)
@@ -112,79 +110,92 @@ func main() {
 		log.Fatalf("Error creating user wallet: %v", err)
 	}
 
-	if err = setupLoan(ctx, eth, wETH, lp, user); err != nil {
+	if err = setupLoan(ctx, client, user); err != nil {
 		log.Fatalf("Error setting up loan: %v", err)
 	}
 	log.Printf("loan succeeded")
 
-	if err = registerProtection(ctx, eth, aETH, p, contractAddress, bot, user); err != nil {
+	/* if err = registerProtection(ctx, client, wETH9Address, daiAddress, p, contractAddress, user); err != nil {
 		log.Fatalf("Error registering for protection: %v", err)
 	}
 	log.Printf("protection registration succeeded")
 
-	if err = executeProtection(ctx, eth, aETH, p, contractAddress, bot, user); err != nil {
+	aETH, err := client.Token(aETHAddress)
+	if err != nil {
+		log.Fatalf("Error creating aETH client: %v", err)
+	}
+
+	if err = executeProtection(ctx, client, aETH, p, contractAddress, user); err != nil {
 		log.Fatalf("Error executing protection: %v", err)
 	}
-	log.Printf("protection execution succeeded")
+	log.Printf("protection execution succeeded") */
 
-	listenAndWait(ctx, eth)
+	listenPrices(ctx, client.ETH())
+
+	api := router.Group("/api")
+	api.GET("/state", func(c *gin.Context) {
+		hexAddr := c.Query("address")
+		log.Printf("got state query addr: %v", hexAddr)
+		if !common.IsHexAddress(hexAddr) {
+			c.AbortWithError(400, fmt.Errorf("%s is not a hex address", hexAddr))
+			return
+		}
+		addr := common.HexToAddress(hexAddr)
+		data, err := client.RetrieveLoanData(ctx, addr)
+		if err != nil {
+			c.AbortWithError(400, err)
+			return
+		}
+
+		threshold := float64(data.LiquidationThreshold) / float64(10000)
+		c.JSON(http.StatusOK, gin.H{
+			"collateral-name":       data.CollateralName,
+			"collateral-address":    data.Collateral.String(),
+			"collateral-amount":     data.CollateralAmount.String(),
+			"debt-name":             data.DebtName,
+			"debt-address":          data.Debt.String(),
+			"debt-amount":           data.DebtAmount.String(),
+			"current-ratio":         data.CurrentRatio.FloatString(10),
+			"liquidation-threshold": fmt.Sprintf("%.4f", threshold),
+		})
+	})
+
+	router.Run(":3000")
 }
 
-func setupLoan(ctx context.Context, eth *ethclient.Client, wETH *weth9.Weth9, lp *lendingpool.Lendingpool, user *wallets.Wallet) error {
-	txr, err := user.NewTransactor(ctx, eth)
-	if err != nil {
-		return err
-	}
-	amount := new(big.Int).Mul(big.NewInt(1), big.NewInt(params.Ether))
-	txr.Value = amount
-	tx, err := wETH.Deposit(txr)
-	if err != nil {
-		return fmt.Errorf("wrapping ETH: %w", err)
-	}
-	r, err := eth.TransactionReceipt(ctx, tx.Hash())
-	if err != nil {
-		return err
-	}
-	if r.Status != 1 {
-		return fmt.Errorf("wrapping ETH transaction failed: %v", r)
+func setupLoan(ctx context.Context, client *clients.Client, user *wallets.Wallet) error {
+	cAmount := new(big.Int).Mul(big.NewInt(1), big.NewInt(params.Ether))
+	if err := client.DepositETH(ctx, user, cAmount); err != nil {
+		return fmt.Errorf("setting up loan: %w", err)
 	}
 
-	if err = user.Execute(ctx, eth, "approving lending pool for WETH",
-		func(txr *bind.TransactOpts) (*types.Transaction, error) {
-			return wETH.Approve(txr, lendingPoolAddress, amount)
-		}); err != nil {
-		return err
+	// An Ether is 1e18 Wei and Dai is expressed at the same ratio, so the same constant can be used
+	// here.
+	dAmount := new(big.Int).Mul(big.NewInt(500), big.NewInt(params.Ether))
+	if err := client.Borrow(ctx, user, daiAddress, dAmount); err != nil {
+		return fmt.Errorf("setting up load: %w", err)
 	}
-
-	if err = user.Execute(ctx, eth, "depositing WETH collateral",
-		func(txr *bind.TransactOpts) (*types.Transaction, error) {
-			return lp.Deposit(txr, wETH9Address, amount, user.Address, 0)
-		}); err != nil {
-		return err
-	}
-
-	if err = user.Execute(ctx, eth, "borrowing DAI",
-		func(txr *bind.TransactOpts) (*types.Transaction, error) {
-			return lp.Borrow(txr, daiAddress, loanAmount, big.NewInt(1), 0, user.Address)
-		}); err != nil {
-		return err
-	}
-
 	return nil
 }
 
-func registerProtection(ctx context.Context, eth *ethclient.Client, aETH *erc20.Erc20, lp *protection.Protection, contractAddress common.Address, bot *wallets.Wallet, user *wallets.Wallet) error {
-	if err := user.Execute(ctx, eth, "approving protection contract for aETH",
+func registerProtection(ctx context.Context, client *clients.Client, cAsset common.Address, dAsset common.Address, lp *protection.Protection, contractAddress common.Address, user *wallets.Wallet) error {
+	aToken, err := client.AToken(ctx, cAsset)
+	if err != nil {
+		return fmt.Errorf("registering protection for %v: %w", user, err)
+	}
+
+	if err := client.Execute(ctx, user, fmt.Sprintf("approving protection contract for %v", cAsset),
 		func(txr *bind.TransactOpts) (*types.Transaction, error) {
-			return aETH.Approve(txr, contractAddress, big.NewInt(-1))
+			return aToken.Approve(txr, contractAddress, big.NewInt(-1))
 		}); err != nil {
 		return err
 	}
 
-	if err := user.Execute(ctx, eth, "registering for protection",
+	if err := client.Execute(ctx, user, "registering for protection",
 		func(txr *bind.TransactOpts) (*types.Transaction, error) {
 			txr.Value = big.NewInt(9500000)
-			return lp.Register(txr, wETH9Address, daiAddress, 0)
+			// XXX use a non-bogus value here.
+			return lp.Register(txr, cAsset, dAsset, 0)
 		}); err != nil {
 		return err
 	}
@@ -192,7 +203,7 @@ func registerProtection(ctx context.Context, eth *ethclient.Client, aETH *erc20.
 	return nil
 }
 
-func executeProtection(ctx context.Context, eth *ethclient.Client, aETH *erc20.Erc20, lp *protection.Protection, contractAddress common.Address, bot *wallets.Wallet, user *wallets.Wallet) error {
+func executeProtection(ctx context.Context, client *clients.Client, aETH *erc20.Erc20, lp *protection.Protection, contractAddress common.Address, user *wallets.Wallet) error {
 	balance, err := aETH.BalanceOf(&bind.CallOpts{Context: ctx}, user.Address)
 	if err != nil {
 		return fmt.Errorf("retrieving user collateral balance: %w", err)
@@ -209,7 +220,7 @@ func executeProtection(ctx context.Context, eth *ethclient.Client, aETH *erc20.E
 		return fmt.Errorf("preparing url: %w", err)
 	}
 
-	oneInchClient := http.Client{Timeout: time.Second * 5}
+	oneInchClient := http.Client{Timeout: time.Second * 10}
 
 	req, err := http.NewRequest(http.MethodGet, buf.String(), nil)
 	if err != nil {
@@ -239,7 +250,7 @@ func executeProtection(ctx context.Context, eth *ethclient.Client, aETH *erc20.E
 		return fmt.Errorf("decoding 1inch calldata %s: %w", content, err)
 	}
 
-	if err = bot.Execute(ctx, eth, "executing protection",
+	if err = client.ExecuteAsBot(ctx, "executing protection",
 		func(txr *bind.TransactOpts) (*types.Transaction, error) {
 			return lp.Execute(txr, user.Address, calldata)
 		}); err != nil {
@@ -249,7 +260,7 @@ func executeProtection(ctx context.Context, eth *ethclient.Client, aETH *erc20.E
 	return nil
 }
 
-func listenAndWait(ctx context.Context, eth *ethclient.Client) {
+func listenPrices(ctx context.Context, eth *ethclient.Client) {
 	fromBlock, err := eth.BlockNumber(ctx)
 	if err != nil {
 		log.Fatalf("Error getting block number: %v", err)
@@ -263,8 +274,6 @@ func listenAndWait(ctx context.Context, eth *ethclient.Client) {
 		func(l *types.Log, a *abis.AnswerUpdated) {
 			log.Printf("BTC (%v): %+v", l.BlockHash, *a)
 		})
-
-	select {} // Waits forever.
 }
 
 func listenAggregator(ctx context.Context, eth *ethclient.Client, aggregator common.Address,
