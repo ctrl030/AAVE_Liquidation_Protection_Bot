@@ -1,5 +1,17 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
+import detectEthereumProvider from '@metamask/detect-provider';
+
+const regeneratorRuntime = require("regenerator-runtime");
+
+let provider;
+
+(async () => {
+  provider = await detectEthereumProvider();
+  if (!provider) {
+    console.log('Please install MetaMask!');
+  }
+})();
 
 function isHexAddress(str) {
   return /^0x[a-fA-F0-9]{40}$/i.test(str)
@@ -16,42 +28,22 @@ const emptyValues = {
   'liquidation-threshold': '',
 };
 
-class AddressInput extends React.Component {
-  constructor(props) {
-    super(props);
-
-    this.onValueChange = props.onValueChange;
-    this.state = { address: '' };
+function addressLink(addr) {
+  if (addr.length < 0) {
+    return <td />;
   }
-
-  render() {
-    return (<div>
-      <input value={this.state.address}
-             onChange={ev => this.onInputChange(ev.target.value)}
-             size="42" />
-      <div id='address-status'>Please enter a wallet address.</div>
-    </div>);
-  }
-
-  onInputChange(address) {
-    this.setState({address: address});
-    if (isHexAddress(address)) {
-      document.getElementById('address-status').innerHTML = '';
-      fetch('http://localhost:3000/api/state?address='.concat(address))
-          .then(response => response.json())
-          .then(data => this.onValueChange(data));
-    } else {
-      document.getElementById('address-status').innerHTML = '<i>Please enter a wallet address.</i>';
-      this.onValueChange(emptyValues);
-    }
-  }
+  return (<td>
+     <a href={'https://etherscan.io/address/'.concat(addr)}>{addr}</a>
+  </td>);
 }
 
 class ProtectionWidget extends React.Component {
   constructor(props) {
     super(props);
 
+    this.connectClicked.bind(this);
     this.state = emptyValues;
+    this.setState.bind(this);
   }
 
   render() {
@@ -60,9 +52,9 @@ class ProtectionWidget extends React.Component {
       <tr>
         <td>Wallet Address</td>
         <td />
-        <td><AddressInput onValueChange={data => {
-          this.setState(data);
-        }} /></td>
+        <td><div id='connect-button'>
+          <button onClick={this.connectClicked}>Connect to Metamask</button>
+        </div></td>
       </tr>
       <tr>
         <td>Collateral</td>
@@ -72,7 +64,7 @@ class ProtectionWidget extends React.Component {
       <tr>
         <td></td>
         <td></td>
-        {this.addressLink(this.state['collateral-address'])}
+        {addressLink(this.state['collateral-address'])}
       </tr>
       <tr>
         <td>Debt</td>
@@ -82,7 +74,7 @@ class ProtectionWidget extends React.Component {
       <tr>
         <td></td>
         <td></td>
-        {this.addressLink(this.state['debt-address'])}
+        {addressLink(this.state['debt-address'])}
       </tr>
       <tr>
         <td>Current Ratio</td>
@@ -98,13 +90,16 @@ class ProtectionWidget extends React.Component {
     );
   }
 
-  addressLink(addr) {
-    if (addr.length < 0) {
-      return <td />;
-    }
-    return (<td>
-       <a href={'https://etherscan.io/address/'.concat(addr)}>{addr}</a>
-    </td>);
+  connectClicked = (e) => {
+    provider.request({ method: 'eth_requestAccounts' })
+      .then(accounts => {
+        let account = accounts[0];
+        document.getElementById('connect-button').innerHTML = account;
+        return fetch('http://localhost:3000/api/state?address='.concat(account));
+      }).then(response => response.json())
+      .then(json => {
+        this.setState(json);
+      });
   }
 }
 
