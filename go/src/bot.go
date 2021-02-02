@@ -44,12 +44,9 @@ var (
 	// ethUSDAggregator is the Aggregator proxied by 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419.
 	ethUSDAggregator = common.HexToAddress("0x00c7A37B03690fb9f41b5C5AF8131735C7275446")
 	// btcUSDAggregator is the Aggregator proxied by 0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c.
-	btcUSDAggregator = common.HexToAddress("0xF570deEffF684D964dc3E15E1F9414283E3f7419")
-	wETH9Address     = common.HexToAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-	daiAddress       = common.HexToAddress("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-	// This is the proxy address for tusd. The implementation address is:
-	// 0xffc40F39806F1400d8278BfD33823705b5a4c196. Not sure which one AAVE uses.
-	tusdAddress        = common.HexToAddress("0x0000000000085d4780B73119b644AE5ecd22b376")
+	btcUSDAggregator   = common.HexToAddress("0xF570deEffF684D964dc3E15E1F9414283E3f7419")
+	wETH9Address       = common.HexToAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+	daiAddress         = common.HexToAddress("0x6B175474E89094C44Da98b954EedeAC495271d0F")
 	aETHAddress        = common.HexToAddress("0x030bA81f1c18d280636F32af80b9AAd02Cf0854e")
 	lendingPoolAddress = common.HexToAddress("0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9")
 
@@ -60,12 +57,6 @@ var (
 			"&disableEstimate=true"))
 
 	loanAmount *big.Int
-
-	ethAggregators = map[common.Address]common.Address{
-		daiAddress: common.HexToAddress("0xd866A07Dea5Ee3c093e21d33660b5579C21F140b"),
-		// Proxied by 0x3886BA987236181D98F2401c507Fb8BeA7871dF2.
-		tusdAddress: common.HexToAddress("0x0c632eC5982e3A8dC116a02ebA7A419efec170B1"),
-	}
 )
 
 func init() {
@@ -149,15 +140,30 @@ func main() {
 
 		threshold := float64(data.LiquidationThreshold) / float64(10000)
 		c.JSON(http.StatusOK, gin.H{
-			"collateral-name":       data.CollateralName,
-			"collateral-address":    data.Collateral.String(),
-			"collateral-amount":     data.CollateralAmount.String(),
-			"debt-name":             data.DebtName,
-			"debt-address":          data.Debt.String(),
-			"debt-amount":           data.DebtAmount.String(),
-			"current-ratio":         data.CurrentRatio.FloatString(10),
-			"liquidation-threshold": fmt.Sprintf("%.4f", threshold),
+			"collateral-name":             data.CollateralName,
+			"collateral-address":          data.Collateral.String(),
+			"collateral-amount":           data.CollateralAmount.String(),
+			"a-token-address":             data.AToken.String(),
+			"debt-name":                   data.DebtName,
+			"debt-address":                data.Debt.String(),
+			"debt-amount":                 data.DebtAmount.String(),
+			"current-ratio":               data.CurrentRatio.FloatString(10),
+			"liquidation-threshold":       fmt.Sprintf("%.4f", threshold),
+			"protection-contract-address": contractAddress.String(),
 		})
+	})
+	api.GET("/abi", func(c *gin.Context) {
+		switch name := c.Query("name"); name {
+		case "erc20":
+			c.DataFromReader(http.StatusOK, int64(len(erc20.Erc20ABI)), gin.MIMEJSON,
+				strings.NewReader(erc20.Erc20ABI), nil)
+		case "protection":
+			c.DataFromReader(http.StatusOK, int64(len(protection.ProtectionABI)), gin.MIMEJSON,
+				strings.NewReader(protection.ProtectionABI), nil)
+		default:
+			c.AbortWithError(400, fmt.Errorf("unknown ABI %s", name))
+			return
+		}
 	})
 
 	router.Run(":3000")

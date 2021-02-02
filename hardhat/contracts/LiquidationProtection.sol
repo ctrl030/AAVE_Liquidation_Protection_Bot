@@ -63,7 +63,7 @@ contract LiquidationProtection is IFlashLoanReceiver {
   /**
    * @param _collateral collateral asset address
    * @param _debt debt asset address
-   * @param _triggerRatio LTV to trigger (in units of 1 / 256)
+   * @param _triggerRatio LTV to trigger (in units of 1/10000, same format AAVE uses)
    */
   function register(address _collateral, address _debt, uint16 _triggerRatio) public payable {
     verifyConfiguration(_collateral, _debt);

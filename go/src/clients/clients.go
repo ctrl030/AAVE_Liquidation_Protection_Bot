@@ -291,6 +291,7 @@ type LoanData struct {
 	Collateral           common.Address
 	CollateralName       string
 	CollateralAmount     *big.Int
+	AToken               common.Address
 	DebtName             string
 	Debt                 common.Address
 	DebtAmount           *big.Int
@@ -373,6 +374,7 @@ collateral assets: %v, debt assets: %v`, collateral, debt)
 		Collateral:           collateral[0],
 		CollateralName:       priceFeeds[collateral[0].Hex()].name,
 		CollateralAmount:     cAmount,
+		AToken:               cInfo.ATokenAddress,
 		Debt:                 debt[0],
 		DebtName:             priceFeeds[debt[0].Hex()].name,
 		DebtAmount:           sdAmount.Add(sdAmount, vdAmount),
