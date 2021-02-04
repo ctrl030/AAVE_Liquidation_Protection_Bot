@@ -127,12 +127,10 @@ func New(deps Deps) (*Service, error) {
 		if err != nil {
 			ctx.AbortWithError(400, fmt.Errorf("getting register body contents: %w", err))
 		}
-		log.Printf("got body=%s", body)
 		rr := &rawRegistration{}
 		if err := json.Unmarshal(body, rr); err != nil {
 			ctx.AbortWithError(400, fmt.Errorf("couldn't parse body %s: %w", body, err))
 		}
-		log.Printf("body parsed into=%+v", rr)
 
 		reg, err := s.verify(ctx, rr)
 		if err != nil {

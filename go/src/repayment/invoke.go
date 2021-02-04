@@ -83,15 +83,15 @@ func NewExecution(ctx context.Context, c *clients.Client, loan *clients.Loan, rA
 	}
 	msg, ok := parsed.(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("parsed 1inch response wasn't map[string]{interface}: %v", content)
+		return nil, fmt.Errorf("parsed 1inch response wasn't map[string]{interface}: %s", content)
 	}
 	tx, ok := msg["tx"].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("tx wasn't map[string]{interface}: %v", content)
+		return nil, fmt.Errorf("tx wasn't map[string]{interface}: %s", content)
 	}
 	calldataHex, ok := tx["data"].(string)
 	if !ok {
-		return nil, fmt.Errorf("1inch response.tx.data wasn't a string: %v", content)
+		return nil, fmt.Errorf("1inch response.tx.data wasn't a string: %s", content)
 	}
 	calldata, err := hex.DecodeString(calldataHex[2:])
 	if err != nil {

@@ -83,7 +83,6 @@ func TestFixture(t *testing.T) {
 			t.Logf("Debt has been repaid.")
 			return
 		}
-		t.Logf("debt=%v", debt)
 		time.Sleep(time.Second * 2)
 	}
 }
