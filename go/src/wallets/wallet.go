@@ -1,4 +1,4 @@
-// Package wallet contains basic functionality around wallets.
+// Package wallet contains basic functionality for test-account wallets.
 package wallets
 
 import (
@@ -48,7 +48,7 @@ func (w *Wallet) NewTransactor(ctx context.Context, ct bind.ContractTransactor) 
 
 	tx := bind.NewKeyedTransactor(w.privateKey)
 	tx.Nonce = big.NewInt(int64(nonce))
-	tx.GasLimit = uint64(9500000) // in units
+	tx.GasLimit = uint64(9500000)
 	tx.GasPrice = gasPrice
 	return tx, nil
 }
@@ -72,4 +72,13 @@ func (w *Wallet) Execute(ctx context.Context, eth *ethclient.Client, desc string
 		return fmt.Errorf("%s transaction failed: %v", desc, r)
 	}
 	return nil
+}
+
+// Sign signs a hash using this wallet.
+func (w *Wallet) Sign(hash common.Hash) ([]byte, error) {
+	signature, err := crypto.Sign(hash.Bytes(), w.privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("signing with %v: %w", w.Address, err)
+	}
+	return signature, nil
 }

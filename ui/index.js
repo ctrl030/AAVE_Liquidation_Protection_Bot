@@ -7,7 +7,7 @@ import Web3 from 'web3';
 const bent = require('bent')
 const getJSON = bent('json')
 
-const HOST = 'http://localhost:3000'
+const API = 'http://localhost:3000/api/'
 const MAX_UINT_AMOUNT =
   '115792089237316195423570985008687907853269984665640564039457584007913129639935';
 
@@ -146,29 +146,31 @@ class ProtectionWidget extends React.Component {
     let cButton = document.getElementById('connect-button');
     cButton.innerHTML = account;
     cButton.disabled = true;
-    let response = await fetch(HOST.concat('/api/state?address=').concat(account));
+    let response = await fetch(API.concat('state?address=').concat(account));
     let json = await response.json();
     this.setState(json);
   }
 
   register = async (value) => {
     console.log("register clicked with value =", value);
-    let erc20ABI = await getJSON(HOST.concat('/api/abi?name=erc20'));
-    let aToken = new web3.eth.Contract(erc20ABI, this.state['a-token-address']);
-    let result = await aToken.methods.approve(
-        this.state['protection-contract-address'], MAX_UINT_AMOUNT).send({
+
+    let typedData = await getJSON(API.concat('cert'));
+    let signature = await provider.request({
+      method: 'eth_signTypedData_v4',
+      params: [account, JSON.stringify(typedData)],
       from: account,
     });
-    console.log('result=', result);
+    let resp = await fetch(API.concat('sign'), { method: "POST", body: signature });
+    if (!resp.ok) {
+      console.log("resp=", resp)
+      throw 'Server did not accept signature.'
+    }
 
-    let ratio = Math.floor(10000 * parseFloat(value));
-    let protectionABI = await getJSON(HOST.concat('/api/abi?name=protection'));
-    let protection = new web3.eth.Contract(
-        protectionABI, this.state['protection-contract-address']);
-    result = await protection.methods.register(this.state['collateral-address'],
-        this.state['debt-address'], ratio).send({
+    let erc20ABI = await getJSON(API.concat('abi?name=erc20'));
+    let aToken = new web3.eth.Contract(erc20ABI, this.state['a-token-address']);
+    let result = await aToken.methods.approve(
+        this.state['contract-address'], MAX_UINT_AMOUNT).send({
       from: account,
-      value: 9500000000,  // Gas used to execute flash repayment.
     });
     console.log('result=', result);
   }

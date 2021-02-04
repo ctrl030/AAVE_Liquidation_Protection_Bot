@@ -14,14 +14,11 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"aggregator"
+	"env"
 	"erc20"
 	"lendingpool"
 	"wallets"
 	"weth9"
-)
-
-const (
-	weth9Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 )
 
 type aggregatorEntry struct {
@@ -46,7 +43,7 @@ func init() {
 			"0xdAC17F958D2ee523a2206206994597C13D831ec7", "0xEe9F2375b4bdF6387aa8265dD4FB8F16512A1d46"},
 		{"WBTC",
 			"0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", "0xdeb288F737066589598e9214E782fa5A8eD689e8"},
-		{"WETH9", weth9Address, ""}, // 1 by definition.
+		{"WETH9", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", ""}, // 1 by definition.
 		{"YFI",
 			"0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e", "0x7c5d4F8345e66f68099581Db340cd65B078C41f4"},
 		{"ZRXToken",
@@ -98,54 +95,45 @@ func init() {
 
 // Client primarily encapsulates Lending Pool operations.
 type Client struct {
-	eth          *ethclient.Client
-	bot          *wallets.Wallet
-	weth9Address common.Address
-	weth         *weth9.Weth9
-	lpAddress    common.Address
-	lp           *lendingpool.Lendingpool
+	env.Params
+
+	eth  *ethclient.Client
+	bot  *wallets.Wallet
+	weth *weth9.Weth9
+	lp   *lendingpool.Lendingpool
 	// tokens maps `common.Address` token addresses to `*erc20.Erc20` token instances.
 	tokens *sync.Map
 	// prices maps `common.Address` token addresses to `*erc20.Erc20` token instances.
 	prices *sync.Map
 }
 
-// Params wraps parameters used to construct the client.
-type Params struct {
-	ETHURI             string
-	BotKey             string
-	WETH9Address       common.Address
-	LendingPoolAddress common.Address
-}
-
 // NewClient initializes a new Client instance.
-func NewClient(params *Params) (*Client, error) {
-	eth, err := ethclient.Dial(params.ETHURI)
+func NewClient(params env.Params) (*Client, error) {
+	eth, err := ethclient.Dial(params.ETHURI())
 	if err != nil {
-		return nil, fmt.Errorf("dialing %s: %w", params.ETHURI, err)
+		return nil, fmt.Errorf("dialing %s: %w", params.ETHURI(), err)
 	}
-	bot, err := wallets.NewWallet(params.BotKey)
+	bot, err := wallets.NewWallet(params.BotKey())
 	if err != nil {
-		return nil, fmt.Errorf("bot wallet from key %s: %w", params.BotKey, err)
+		return nil, fmt.Errorf("bot wallet from key %s: %w", params.BotKey(), err)
 	}
-	weth, err := weth9.NewWeth9(params.WETH9Address, eth)
+	weth, err := weth9.NewWeth9(params.WETH9Address(), eth)
 	if err != nil {
-		return nil, fmt.Errorf("creating WETH from %s: %w", params.WETH9Address, err)
+		return nil, fmt.Errorf("creating WETH from %s: %w", params.WETH9Address(), err)
 	}
-	lp, err := lendingpool.NewLendingpool(params.LendingPoolAddress, eth)
+	lp, err := lendingpool.NewLendingpool(params.LendingPoolAddress(), eth)
 	if err != nil {
-		return nil, fmt.Errorf("creating LendingPool from %s: %w", params.LendingPoolAddress, err)
+		return nil, fmt.Errorf("creating LendingPool from %s: %w", params.LendingPoolAddress(), err)
 	}
 
 	return &Client{
-		eth:          eth,
-		bot:          bot,
-		weth9Address: params.WETH9Address,
-		weth:         weth,
-		lpAddress:    params.LendingPoolAddress,
-		lp:           lp,
-		tokens:       new(sync.Map),
-		prices:       new(sync.Map),
+		Params: params,
+		eth:    eth,
+		bot:    bot,
+		weth:   weth,
+		lp:     lp,
+		tokens: new(sync.Map),
+		prices: new(sync.Map),
 	}, nil
 }
 
@@ -173,6 +161,11 @@ func (c *Client) Execute(ctx context.Context, from *wallets.Wallet, desc string,
 		return fmt.Errorf("%s transaction failed: %v", desc, r)
 	}
 	return nil
+}
+
+// BotAddress returns the address of the bot.
+func (c *Client) BotAddress() common.Address {
+	return c.bot.Address
 }
 
 // Execute performs the transaction `t` using the bot's credentials.
@@ -217,7 +210,7 @@ func (c *Client) Aggregator(addr string) (*aggregator.Aggregator, error) {
 func (c *Client) PriceOf(ctx context.Context, addr string) (*big.Int, *big.Int, error) {
 	var price *big.Int
 	var decimals uint8
-	if addr == weth9Address {
+	if addr == c.WETH9Address().Hex() {
 		price = big.NewInt(1)
 		decimals = 0
 	} else {
@@ -263,14 +256,14 @@ func (c *Client) DepositETH(ctx context.Context, from *wallets.Wallet, amount *b
 
 	if err = c.Execute(ctx, from, "approving lending pool for WETH",
 		func(txr *bind.TransactOpts) (*types.Transaction, error) {
-			return c.weth.Approve(txr, c.lpAddress, amount)
+			return c.weth.Approve(txr, c.LendingPoolAddress(), amount)
 		}); err != nil {
 		return err
 	}
 
 	if err = c.Execute(ctx, from, "depositing WETH collateral",
 		func(txr *bind.TransactOpts) (*types.Transaction, error) {
-			return c.lp.Deposit(txr, c.weth9Address, amount, from.Address, 0)
+			return c.lp.Deposit(txr, c.WETH9Address(), amount, from.Address, 0)
 		}); err != nil {
 		return err
 	}
@@ -286,22 +279,23 @@ func (c *Client) Borrow(ctx context.Context, onBehalfOf *wallets.Wallet, asset c
 		})
 }
 
-// LoanData contains information about a loan.
-type LoanData struct {
-	Collateral           common.Address
+// Loan contains metadata about a loan.
+type Loan struct {
+	User common.Address
+
 	CollateralName       string
-	CollateralAmount     *big.Int
+	Collateral           common.Address
 	AToken               common.Address
-	DebtName             string
-	Debt                 common.Address
-	DebtAmount           *big.Int
-	CurrentRatio         *big.Rat
 	LiquidationThreshold uint16
-	ConfiguredRatio      *big.Int
+
+	DebtName     string
+	Debt         common.Address
+	StableDebt   common.Address
+	VariableDebt common.Address
 }
 
-// RetrieveLoanData retrieves loan information for the given user.
-func (c *Client) RetrieveLoanData(ctx context.Context, u common.Address) (*LoanData, error) {
+// Loan retrieves metadata about a user's loan.
+func (c *Client) Loan(ctx context.Context, u common.Address) (*Loan, error) {
 	reserves, err := c.lp.GetReservesList(&bind.CallOpts{Context: ctx})
 	if err != nil {
 		return nil, fmt.Errorf("getting reserves list: %v", err)
@@ -333,35 +327,54 @@ collateral assets: %v, debt assets: %v`, collateral, debt)
 	configBytes := cInfo.Configuration.Data.Bytes() // `Bytes` returns big endian.
 	threshold := binary.BigEndian.Uint16(configBytes[len(configBytes)-4 : len(configBytes)-2])
 
-	cAmount, err := c.BalanceOf(ctx, cInfo.ATokenAddress, u)
-	if err != nil {
-		return nil, fmt.Errorf("balance for user %v: %w", u, err)
-	}
-
 	dInfo, err := c.lp.GetReserveData(&bind.CallOpts{Context: ctx}, debt[0])
 	if err != nil {
 		return nil, fmt.Errorf("retrieving reserve data for %v: %v", debt[0], err)
 	}
 
-	sdAmount, err := c.BalanceOf(ctx, dInfo.StableDebtTokenAddress, u)
+	return &Loan{
+		User:                 u,
+		CollateralName:       priceFeeds[collateral[0].Hex()].name,
+		Collateral:           collateral[0],
+		AToken:               cInfo.ATokenAddress,
+		LiquidationThreshold: threshold,
+		DebtName:             priceFeeds[debt[0].Hex()].name,
+		Debt:                 debt[0],
+		StableDebt:           dInfo.StableDebtTokenAddress,
+		VariableDebt:         dInfo.VariableDebtTokenAddress,
+	}, nil
+}
+
+// LoanAmount contains information about a loan.
+type LoanAmount struct {
+	CollateralAmount *big.Int
+	DebtAmount       *big.Int
+	CurrentRatio     *big.Rat
+}
+
+// Data retrieves loan amounts.
+func (l *Loan) Data(ctx context.Context, c *Client) (*LoanAmount, error) {
+	cAmount, err := c.BalanceOf(ctx, l.AToken, l.User)
 	if err != nil {
-		return nil, fmt.Errorf("retrieving stable debt balance for %v: %w", u, err)
+		return nil, fmt.Errorf("balance for user %v: %w", l.User, err)
+	}
+	cPrice, cFactor, err := c.PriceOf(ctx, l.Collateral.Hex())
+	if err != nil {
+		return nil, fmt.Errorf("converting collateral %v to eth: %w", l.Collateral, err)
 	}
 
-	vdAmount, err := c.BalanceOf(ctx, dInfo.VariableDebtTokenAddress, u)
+	sdAmount, err := c.BalanceOf(ctx, l.StableDebt, l.User)
 	if err != nil {
-		return nil, fmt.Errorf("retrieving variable debt balance for %v: %w", u, err)
+		return nil, fmt.Errorf("retrieving stable debt balance for %v: %w", l.User, err)
 	}
-
+	vdAmount, err := c.BalanceOf(ctx, l.VariableDebt, l.User)
+	if err != nil {
+		return nil, fmt.Errorf("retrieving variable debt balance for %v: %w", l.User, err)
+	}
 	dAmount := new(big.Int).Add(sdAmount, vdAmount)
-
-	cPrice, cFactor, err := c.PriceOf(ctx, collateral[0].Hex())
+	dPrice, dFactor, err := c.PriceOf(ctx, l.Debt.Hex())
 	if err != nil {
-		return nil, fmt.Errorf("converting collateral %v to eth: %w", collateral[0], err)
-	}
-	dPrice, dFactor, err := c.PriceOf(ctx, debt[0].Hex())
-	if err != nil {
-		return nil, fmt.Errorf("converting debt %v to eth: %w", debt[0], err)
+		return nil, fmt.Errorf("converting debt %v to eth: %w", l.Debt, err)
 	}
 
 	cEthAmount := new(big.Int).Mul(cAmount, cPrice)
@@ -370,16 +383,10 @@ collateral assets: %v, debt assets: %v`, collateral, debt)
 	ratio := new(big.Rat).SetFrac(dEthAmount, cEthAmount)
 	ratio = ratio.Mul(ratio, new(big.Rat).SetFrac(cFactor, dFactor))
 
-	return &LoanData{
-		Collateral:           collateral[0],
-		CollateralName:       priceFeeds[collateral[0].Hex()].name,
-		CollateralAmount:     cAmount,
-		AToken:               cInfo.ATokenAddress,
-		Debt:                 debt[0],
-		DebtName:             priceFeeds[debt[0].Hex()].name,
-		DebtAmount:           sdAmount.Add(sdAmount, vdAmount),
-		CurrentRatio:         ratio,
-		LiquidationThreshold: threshold,
+	return &LoanAmount{
+		CollateralAmount: cAmount,
+		DebtAmount:       dAmount,
+		CurrentRatio:     ratio,
 	}, nil
 }
 
