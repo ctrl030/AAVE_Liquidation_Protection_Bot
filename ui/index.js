@@ -7,13 +7,13 @@ import Web3 from 'web3';
 const bent = require('bent')
 const getJSON = bent('json')
 
-const API = 'http://localhost:3000/api/'
+const API = window.location.protocol.concat('//').concat(window.location.host).concat('/api/')
 const MAX_UINT_AMOUNT =
   '115792089237316195423570985008687907853269984665640564039457584007913129639935';
 
 let provider;
 let web3;
-let account;  // XXX: reduce the scope of this.
+let account;  // TODO(greatfilter): reduce the scope of this.
 
 (async () => {
   provider = await detectEthereumProvider();
@@ -87,11 +87,13 @@ class ProtectionWidget extends React.Component {
       'collateral-name': '',
       'collateral-address': '',
       'collateral-amount': '',
+      'a-token-address': '',
       'debt-name': '',
       'debt-address': '',
       'debt-amount': '',
       'current-ratio': '',
       'liquidation-threshold': '',
+      'contract-address': '',
     };
   }
 
@@ -102,7 +104,7 @@ class ProtectionWidget extends React.Component {
         <td>Wallet Address</td>
         <td />
         <td>
-          <button id='connect-button' onClick={this.connectClicked}>Connect to Metamask</button>
+          <button id='connect-button' onClick={this.connectClicked}>Connect to MetaMask</button>
         </td>
       </tr>
       <tr>
@@ -160,7 +162,14 @@ class ProtectionWidget extends React.Component {
       params: [account, JSON.stringify(typedData)],
       from: account,
     });
-    let resp = await fetch(API.concat('sign'), { method: "POST", body: signature });
+    let postContent = {
+      "signature": signature,
+      "threshold": value
+    };
+    let resp = await fetch(API.concat('register'), {
+      method: "POST",
+      body: JSON.stringify(postContent),
+    });
     if (!resp.ok) {
       console.log("resp=", resp)
       throw 'Server did not accept signature.'
@@ -186,5 +195,5 @@ class App extends React.Component {
   }
 }
 
-// Take this component's generated HTML and put it on the page (in the DOM).
+// Puts this component's generated HTML on the page (in the DOM).
 ReactDOM.render(<App />, document.getElementById('app'));

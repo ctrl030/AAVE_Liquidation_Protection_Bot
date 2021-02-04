@@ -80,5 +80,11 @@ func (w *Wallet) Sign(hash common.Hash) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("signing with %v: %w", w.Address, err)
 	}
+	switch last := signature[len(signature)-1]; last {
+	case '\x00':
+		signature[len(signature)-1] = '\x1B'
+	case '\x01':
+		signature[len(signature)-1] = '\x1C'
+	}
 	return signature, nil
 }

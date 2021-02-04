@@ -2,13 +2,14 @@ package test
 
 import (
 	"context"
-	"encoding/hex"
 	"log"
 	"os"
 	"os/exec"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common/hexutil"
 
 	"clients"
 	"delegation"
@@ -63,15 +64,16 @@ func TestFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error signing certificate: %v", err)
 	}
-	want := hex.EncodeToString(sig[:len(sig)-1])
+	want := hexutil.Encode(sig)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	var got string
 
 	// service.Serve doesn't return, so we start it in a goroutine, then wait on the callback.
-	go service.Serve(client, "../../../ui/dist", repAddr, cert, func(sig []byte) {
-		got = string(sig[2 : len(sig)-2])
+	go service.Serve(client, "../../../ui/dist", repAddr, cert, func(reg *service.Registration) {
+		got = reg.Signature
+		t.Logf("threshold=%v", reg.Threshold)
 		wg.Done()
 	})
 
@@ -80,7 +82,6 @@ func TestFixture(t *testing.T) {
 	if got != want {
 		t.Fatalf("signature mismatch, got=%s, want=%s", got, want)
 	}
-	t.Logf("done!")
 }
 
 func TestMain(m *testing.M) {

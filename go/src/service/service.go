@@ -3,6 +3,7 @@ package service
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -18,10 +19,16 @@ import (
 	"erc20"
 )
 
+// Registration contains registration data passed from the client.
+type Registration struct {
+	Signature string `json:"signature"`
+	Threshold string `json:"threshold"`
+}
+
 // Serve serves the frontend rooted at `path`. It provides the repayment address, `repAddr`, to the
 // client so that it may approve withdrawal of ATokens and it provides the JSON serialized
 // certificate, `cert`, to the client for signing. Signatures are notified via the callback `cb`.
-func Serve(client *clients.Client, path string, repAddr common.Address, cert *delegation.Certificate, cb func([]byte)) {
+func Serve(client *clients.Client, path string, repAddr common.Address, cert *delegation.Certificate, cb func(*Registration)) {
 	router := gin.Default()
 	router.Use(static.Serve("/", static.LocalFile(path, true)))
 
@@ -75,13 +82,17 @@ func Serve(client *clients.Client, path string, repAddr common.Address, cert *de
 		ctx.AsciiJSON(http.StatusOK, cert.TypedData())
 	})
 
-	api.POST("/sign", func(ctx *gin.Context) {
-		sig, err := ioutil.ReadAll(ctx.Request.Body)
+	api.POST("/register", func(ctx *gin.Context) {
+		body, err := ioutil.ReadAll(ctx.Request.Body)
 		if err != nil {
-			ctx.AbortWithError(400, fmt.Errorf("getting sign body contents: %w", err))
+			ctx.AbortWithError(400, fmt.Errorf("getting register body contents: %w", err))
 		}
-		go cb(sig) // Callback runs in a goroutine in case it blocks.
-		ctx.Request.Body = ioutil.NopCloser(bytes.NewReader(sig))
+		reg := &Registration{}
+		if err := json.Unmarshal(body, reg); err != nil {
+			ctx.AbortWithError(400, fmt.Errorf("couldn't parse body %s: %w", body, err))
+		}
+		go cb(reg) // Callback runs in a goroutine in case it blocks.
+		ctx.Request.Body = ioutil.NopCloser(bytes.NewReader(body))
 		ctx.Status(http.StatusOK)
 	})
 
