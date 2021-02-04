@@ -57,11 +57,7 @@ func TestContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delegation.New(%v) = _, %v, want _, nil", client.BotAddress(), err)
 	}
-	hash, err := cert.Hash()
-	if err != nil {
-		t.Fatalf("cert.Hash() = _, %v, want _, nil", err)
-	}
-	signature, err := user.Sign(hash)
+	signature, err := user.Sign(cert.Hash())
 	if err != nil {
 		t.Fatalf("Error signing certificate: %v", err)
 	}

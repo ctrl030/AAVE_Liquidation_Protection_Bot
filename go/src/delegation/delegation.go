@@ -14,14 +14,10 @@ import (
 	"github.com/ethereum/go-ethereum/signer/core"
 )
 
-const (
-	appName = "AAVE Liquidation Protection Bot"
-	salt    = "SU%N6gmumvj.A{@B,SdWXtVgg(Bof9SA"
-)
-
 type Certificate struct {
 	delegate common.Address
 	data     *core.TypedData
+	hash     common.Hash
 }
 
 // New generates a new certificate for the given delegate.
@@ -40,18 +36,24 @@ func New(delegate common.Address) (*Certificate, error) {
 		},
 		PrimaryType: "Delegate",
 		Domain: core.TypedDataDomain{
-			Name:    appName,
+			Name:    "AAVE Liquidation Protection Bot",
 			Version: "1",
 			ChainId: math.NewHexOrDecimal256(1337), // Mainnet
-			Salt:    salt,
+			Salt:    "SU%N6gmumvj.A{@B,SdWXtVgg(Bof9SA",
 		},
 		Message: core.TypedDataMessage{
 			"delegate": delegate.Hex(),
 		},
 	}
+
+	hash, err := computeHash(data)
+	if err != nil {
+		return nil, fmt.Errorf("generating cert for %v: %w", delegate, err)
+	}
 	return &Certificate{
 		delegate: delegate,
 		data:     data,
+		hash:     hash,
 	}, nil
 }
 
@@ -61,14 +63,18 @@ func (c *Certificate) TypedData() *core.TypedData {
 }
 
 // Hash returns the EIP-712 hash for the delegate.
-func (c *Certificate) Hash() (common.Hash, error) {
-	domainHash, err := c.data.HashStruct("EIP712Domain", c.data.Domain.Map())
+func (c *Certificate) Hash() common.Hash {
+	return c.hash
+}
+
+func computeHash(td *core.TypedData) (common.Hash, error) {
+	domainHash, err := td.HashStruct("EIP712Domain", td.Domain.Map())
 	if err != nil {
-		return common.BytesToHash(nil), fmt.Errorf("hashing domain for %v: %w", c.delegate, err)
+		return common.BytesToHash(nil), fmt.Errorf("hashing domain: %w", err)
 	}
-	dataHash, err := c.data.HashStruct(c.data.PrimaryType, c.data.Message)
+	dataHash, err := td.HashStruct(td.PrimaryType, td.Message)
 	if err != nil {
-		return common.BytesToHash(nil), fmt.Errorf("hashing message for %v: %w", c.delegate, err)
+		return common.BytesToHash(nil), fmt.Errorf("hashing message: %w", err)
 	}
 	var buf bytes.Buffer
 	buf.WriteByte('\x19')

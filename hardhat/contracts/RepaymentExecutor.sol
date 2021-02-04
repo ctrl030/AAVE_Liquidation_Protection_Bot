@@ -156,7 +156,7 @@ contract RepaymentExecutor is IFlashLoanReceiver {
     require(asset.transfer(_fp.user, remaining), "transferring remainder to user failed");
   }
 
-  function verifySignature(address _user, bytes memory _signature) private view {
+  function verifySignature(address _user, bytes memory _signature) public view {
     bytes32 digest = keccak256(abi.encodePacked(
         "\x19\x01",
         DOMAIN_SEPARATOR,

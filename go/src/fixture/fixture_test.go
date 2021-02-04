@@ -3,13 +3,11 @@ package test
 import (
 	"context"
 	"log"
+	"math/big"
 	"os"
 	"os/exec"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/ethereum/go-ethereum/common/hexutil"
 
 	"clients"
 	"delegation"
@@ -25,6 +23,8 @@ var (
 	params = env.LocalTestNet()
 )
 
+// TestFixture sets up the local (forked) test network and the initial loan. The network stays
+// up until the loan is repaid, which is determined by polling.
 func TestFixture(t *testing.T) {
 	ctx := context.Background()
 
@@ -34,7 +34,7 @@ func TestFixture(t *testing.T) {
 	}
 
 	// Deploys the contract.
-	_, repAddr, err := repayment.Deploy(ctx, client)
+	rep, repAddr, err := repayment.Deploy(ctx, client)
 	if err != nil {
 		t.Fatalf("deploying repayment contract failed: %v", err)
 	}
@@ -49,38 +49,42 @@ func TestFixture(t *testing.T) {
 		t.Fatalf("Error setting up loan: %v", err)
 	}
 
+	loan, err := client.Loan(ctx, user.Address)
+	if err != nil {
+		t.Fatalf("clients.Loan(ctx, %v) = _, %v, want _, nil", user.Address, err)
+	}
+
 	// Creates the certificate.
 	cert, err := delegation.New(client.BotAddress())
 	if err != nil {
 		t.Fatalf("delegation.New(%v) = _, %v, want _, nil", client.BotAddress(), err)
 	}
 
-	// Computes the signature locally to test it against the one produced by Metamask.
-	hash, err := cert.Hash()
-	if err != nil {
-		t.Fatalf("cert.Hash() = _, %v, want _, nil", err)
-	}
-	sig, err := user.Sign(hash)
-	if err != nil {
-		t.Fatalf("Error signing certificate: %v", err)
-	}
-	want := hexutil.Encode(sig)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	var got string
-
-	// service.Serve doesn't return, so we start it in a goroutine, then wait on the callback.
-	go service.Serve(client, "../../../ui/dist", repAddr, cert, func(reg *service.Registration) {
-		got = reg.Signature
-		t.Logf("threshold=%v", reg.Threshold)
-		wg.Done()
+	s, err := service.New(service.Deps{
+		Client:  client,
+		RepAddr: repAddr,
+		Rep:     rep,
+		Root:    "../../../ui/dist",
+		Cert:    cert,
 	})
+	if err != nil {
+		t.Fatalf("service.New(...) = _, %v, want _, nil", err)
+	}
 
-	wg.Wait()
+	// Since Run doesn't return, we start it in a goroutine.
+	go s.Run()
 
-	if got != want {
-		t.Fatalf("signature mismatch, got=%s, want=%s", got, want)
+	for {
+		debt, err := loan.DebtAmount(ctx, client)
+		if err != nil {
+			t.Fatalf("loan.DebtAmount(...) = _, %v, want _, nil", err)
+		}
+		if debt.Cmp(big.NewInt(0)) == 0 {
+			t.Logf("Debt has been repaid.")
+			return
+		}
+		t.Logf("debt=%v", debt)
+		time.Sleep(time.Second * 2)
 	}
 }
 

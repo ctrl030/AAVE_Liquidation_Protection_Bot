@@ -102,9 +102,12 @@ type Client struct {
 	weth *weth9.Weth9
 	lp   *lendingpool.Lendingpool
 	// tokens maps `common.Address` token addresses to `*erc20.Erc20` token instances.
-	tokens *sync.Map
-	// prices maps `common.Address` token addresses to `*erc20.Erc20` token instances.
-	prices *sync.Map
+	tokens sync.Map
+	// prices maps `common.Address` token addresses to `*aggregator.Aggregator` instances.
+	prices sync.Map
+	// loans serves as a cache for the expensive `Loan` computations it maps `common.Address` account
+	// addresses to `*loanFuture` instances.
+	loans sync.Map
 }
 
 // NewClient initializes a new Client instance.
@@ -132,8 +135,6 @@ func NewClient(params env.Params) (*Client, error) {
 		bot:    bot,
 		weth:   weth,
 		lp:     lp,
-		tokens: new(sync.Map),
-		prices: new(sync.Map),
 	}, nil
 }
 
@@ -294,8 +295,24 @@ type Loan struct {
 	VariableDebt common.Address
 }
 
-// Loan retrieves metadata about a user's loan.
+type loanFuture struct {
+	computeOnce sync.Once
+	loan        *Loan
+	err         error
+}
+
+// Loan returns (possibly cached) metadata about a user's loan.
 func (c *Client) Loan(ctx context.Context, u common.Address) (*Loan, error) {
+	v, ok := c.loans.Load(u)
+	if !ok {
+		v, _ = c.loans.LoadOrStore(u, &loanFuture{})
+	}
+	lf := v.(*loanFuture)
+	lf.computeOnce.Do(func() { lf.loan, lf.err = c.loan(ctx, u) })
+	return lf.loan, lf.err
+}
+
+func (c *Client) loan(ctx context.Context, u common.Address) (*Loan, error) {
 	reserves, err := c.lp.GetReservesList(&bind.CallOpts{Context: ctx})
 	if err != nil {
 		return nil, fmt.Errorf("getting reserves list: %v", err)
@@ -352,6 +369,13 @@ type LoanAmount struct {
 	CurrentRatio     *big.Rat
 }
 
+// Ratio returns the ratio in units of 1/10000.
+func (l *LoanAmount) Ratio() uint16 {
+	ratioF, _ := l.CurrentRatio.Float64()
+	ratioF *= 10000
+	return uint16(ratioF)
+}
+
 // Data retrieves loan amounts.
 func (l *Loan) Data(ctx context.Context, c *Client) (*LoanAmount, error) {
 	cAmount, err := c.BalanceOf(ctx, l.AToken, l.User)
@@ -363,15 +387,7 @@ func (l *Loan) Data(ctx context.Context, c *Client) (*LoanAmount, error) {
 		return nil, fmt.Errorf("converting collateral %v to eth: %w", l.Collateral, err)
 	}
 
-	sdAmount, err := c.BalanceOf(ctx, l.StableDebt, l.User)
-	if err != nil {
-		return nil, fmt.Errorf("retrieving stable debt balance for %v: %w", l.User, err)
-	}
-	vdAmount, err := c.BalanceOf(ctx, l.VariableDebt, l.User)
-	if err != nil {
-		return nil, fmt.Errorf("retrieving variable debt balance for %v: %w", l.User, err)
-	}
-	dAmount := new(big.Int).Add(sdAmount, vdAmount)
+	dAmount, err := l.DebtAmount(ctx, c)
 	dPrice, dFactor, err := c.PriceOf(ctx, l.Debt.Hex())
 	if err != nil {
 		return nil, fmt.Errorf("converting debt %v to eth: %w", l.Debt, err)
@@ -388,6 +404,19 @@ func (l *Loan) Data(ctx context.Context, c *Client) (*LoanAmount, error) {
 		DebtAmount:       dAmount,
 		CurrentRatio:     ratio,
 	}, nil
+}
+
+// DebtAmount returns the total amount of debt (stable plus variable).
+func (l *Loan) DebtAmount(ctx context.Context, c *Client) (*big.Int, error) {
+	sdAmount, err := c.BalanceOf(ctx, l.StableDebt, l.User)
+	if err != nil {
+		return nil, fmt.Errorf("retrieving stable debt balance for %v: %w", l.User, err)
+	}
+	vdAmount, err := c.BalanceOf(ctx, l.VariableDebt, l.User)
+	if err != nil {
+		return nil, fmt.Errorf("retrieving variable debt balance for %v: %w", l.User, err)
+	}
+	return new(big.Int).Add(sdAmount, vdAmount), nil
 }
 
 // BalanceOf returns the balance of the given ERC20 asset in the given wallet.

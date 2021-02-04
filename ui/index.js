@@ -156,6 +156,14 @@ class ProtectionWidget extends React.Component {
   register = async (value) => {
     console.log("register clicked with value =", value);
 
+    let erc20ABI = await getJSON(API.concat('abi?name=erc20'));
+    let aToken = new web3.eth.Contract(erc20ABI, this.state['a-token-address']);
+    let result = await aToken.methods.approve(
+        this.state['contract-address'], MAX_UINT_AMOUNT).send({
+      from: account,
+    });
+    console.log('result=', result);
+
     let typedData = await getJSON(API.concat('cert'));
     let signature = await provider.request({
       method: 'eth_signTypedData_v4',
@@ -163,6 +171,7 @@ class ProtectionWidget extends React.Component {
       from: account,
     });
     let postContent = {
+      "user": account,
       "signature": signature,
       "threshold": value
     };
@@ -171,17 +180,9 @@ class ProtectionWidget extends React.Component {
       body: JSON.stringify(postContent),
     });
     if (!resp.ok) {
-      console.log("resp=", resp)
-      throw 'Server did not accept signature.'
+      console.log("resp=", resp);
+      throw 'Server did not accept signature.';
     }
-
-    let erc20ABI = await getJSON(API.concat('abi?name=erc20'));
-    let aToken = new web3.eth.Contract(erc20ABI, this.state['a-token-address']);
-    let result = await aToken.methods.approve(
-        this.state['contract-address'], MAX_UINT_AMOUNT).send({
-      from: account,
-    });
-    console.log('result=', result);
   }
 }
 
