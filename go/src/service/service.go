@@ -157,8 +157,6 @@ type registration struct {
 	// threshold is the ratio at which to liquidate in units of 1/10000. Its value is uint16, but that
 	// type is not supported by atomic.
 	threshold int32
-	gasPrice  uint64
-	gasLimit  uint64
 
 	runOnce sync.Once
 }
