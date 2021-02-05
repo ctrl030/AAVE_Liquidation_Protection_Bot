@@ -137,6 +137,9 @@ class ProtectionWidget extends React.Component {
         <td>{this.state['liquidation-threshold']}</td>
       </tr>
       <RegisterWidget threshold={this.state['liquidation-threshold']} register={this.register} />
+      <tr>
+      <td colspan="3"><div id="status-placeholder" /></td>
+      </tr>
       </table>
     );
   }
@@ -162,6 +165,10 @@ class ProtectionWidget extends React.Component {
       from: account,
     });
     console.log('result=', result);
+    if (!result.status) {
+      document.getElementById('status-placeholder').innerHTML
+          = '<p style="color:red;">Approval failed. Check console logs.</p>';
+    }
 
     let typedData = await getJSON(API.concat('cert'));
     let signature = await provider.request({
@@ -180,8 +187,11 @@ class ProtectionWidget extends React.Component {
     });
     if (!resp.ok) {
       console.log("resp=", resp);
-      throw 'Server did not accept signature.';
+      document.getElementById('status-placeholder').innerHTML
+          = '<p style="color:red;">Signing failed. Check console logs.</p>';
     }
+    document.getElementById('status-placeholder').innerHTML =
+        '<div style="color:green;text-align: center;">Registration succeeded.</div>';
   }
 }
 

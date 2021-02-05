@@ -68,7 +68,7 @@ func Swap(ctx context.Context, c *clients.Client, loan *clients.Loan, rAddr comm
 		if res.StatusCode == http.StatusOK {
 			break
 		}
-		if res.StatusCode == http.StatusInternalServerError {
+		if res.StatusCode == http.StatusInternalServerError || res.StatusCode == http.StatusBadGateway {
 			log.Printf("retrying server error: %+v", res)
 			time.Sleep(time.Second)
 		} else {
