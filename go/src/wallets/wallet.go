@@ -41,15 +41,8 @@ func (w *Wallet) NewTransactor(ctx context.Context, ct bind.ContractTransactor) 
 	if err != nil {
 		return nil, fmt.Errorf("obtaining pending nonce: %w", err)
 	}
-	gasPrice, err := ct.SuggestGasPrice(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getting suggested gas price: %w", err)
-	}
-
 	tx := bind.NewKeyedTransactor(w.privateKey)
 	tx.Nonce = big.NewInt(int64(nonce))
-	tx.GasLimit = uint64(9500000)
-	tx.GasPrice = gasPrice
 	return tx, nil
 }
 

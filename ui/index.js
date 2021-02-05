@@ -37,7 +37,9 @@ class RegisterWidget extends React.Component {
   constructor(props) {
     super(props);
 
-    this.state = { value: '' };
+    this.state = {
+      customThreshold: '',
+    };
     this.registerCb = props.register;
   }
 
@@ -45,15 +47,11 @@ class RegisterWidget extends React.Component {
     this.checkEnabled();
   }
 
-  onInputChange(value) {
-    this.setState({value: value});
-  }
-
   checkEnabled() {
     let threshold = parseFloat(this.props.threshold);
-    let value = parseFloat(this.state.value);
+    let customThreshold = parseFloat(this.state.customThreshold);
     let button = document.getElementById('register-button');
-    if (threshold > 0 && value > 0 && value < threshold) {
+    if (threshold > 0 && customThreshold > 0 && customThreshold < threshold) {
       button.removeAttribute('disabled');
       button.addEventListener('click', this.register);
     } else {
@@ -62,18 +60,19 @@ class RegisterWidget extends React.Component {
   }
 
   register = () => {
-    this.registerCb(this.state.value);
+    this.registerCb(this.state.customThreshold);
   }
 
   render() {
     return (<tr>
       <td>
-        <button id='register-button' onClick={this.register} disabled>Register Protection</button>
+        <button id='register-button' onClick={this.register} disabled>
+          Register Automated Repayment
+        </button>
       </td>
       <td>Custom Threshold</td>
-      <td><input
-          value={this.state.value}
-          onChange={ev => this.setState({value: ev.target.value})} />
+      <td><input value={this.state.value}
+          onChange={ev => { this.setState({ customThreshold: ev.target.value }) }} />
       </td>
     </tr>);
   }
@@ -173,7 +172,7 @@ class ProtectionWidget extends React.Component {
     let postContent = {
       "user": account,
       "signature": signature,
-      "threshold": value
+      "threshold": value,
     };
     let resp = await fetch(API.concat('register'), {
       method: "POST",

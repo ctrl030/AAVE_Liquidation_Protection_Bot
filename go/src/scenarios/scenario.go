@@ -17,14 +17,14 @@ import (
 
 // SetupLoan deposits 1 ETH from the given account and borrows 500 Dai.
 func SetupLoan(ctx context.Context, c *clients.Client, user *wallets.Wallet) error {
-	cAmount := new(big.Int).Mul(big.NewInt(1), big.NewInt(params.Ether))
+	cAmount := new(big.Int).Mul(big.NewInt(100), big.NewInt(params.Ether))
 	if err := c.DepositETH(ctx, user, cAmount); err != nil {
 		return fmt.Errorf("setting up loan: %w", err)
 	}
 
 	// An Ether is 1e18 Wei and Dai is expressed at the same ratio, so the same constant can be used
 	// here.
-	dAmount := new(big.Int).Mul(big.NewInt(500), big.NewInt(params.Ether))
+	dAmount := new(big.Int).Mul(big.NewInt(80000), big.NewInt(params.Ether))
 	if err := c.Borrow(ctx, user, c.DaiAddress(), dAmount); err != nil {
 		return fmt.Errorf("setting up loan: %w", err)
 	}

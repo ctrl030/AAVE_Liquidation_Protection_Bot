@@ -86,6 +86,7 @@ func New(deps Deps) (*Service, error) {
 			ctx.AbortWithError(400, err)
 			return
 		}
+
 		amount, err := loan.Data(ctx, deps.Client)
 		if err != nil {
 			ctx.AbortWithError(400, err)
@@ -156,6 +157,8 @@ type registration struct {
 	// threshold is the ratio at which to liquidate in units of 1/10000. Its value is uint16, but that
 	// type is not supported by atomic.
 	threshold int32
+	gasPrice  uint64
+	gasLimit  uint64
 
 	runOnce sync.Once
 }
@@ -210,7 +213,7 @@ func (s *Service) verify(ctx context.Context, r *rawRegistration) (*registration
 	}
 	user := common.HexToAddress(r.User)
 
-	// Verifies the signature.
+	// Verifies the signature is the user-signed delegation certificate for the bot (this process).
 	sig, err := hexutil.Decode(r.Signature)
 	if err != nil {
 		return nil, fmt.Errorf("signature was not hex %v: %w", r, err)

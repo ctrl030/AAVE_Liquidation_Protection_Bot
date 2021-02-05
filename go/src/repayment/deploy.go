@@ -18,10 +18,13 @@ func Deploy(ctx context.Context, c *clients.Client) (*Repayment, common.Address,
 		func(txr *bind.TransactOpts) (*types.Transaction, error) {
 			var tx *types.Transaction
 			var err error
+			// Gas limit estimation fails for deployment. It crashes trying to resolve a transaction
+			// recipient, but there's none for deployment.
+			txr.GasLimit = uint64(9500000)
 			addr, tx, r, err = DeployRepayment(txr, c.ETH())
 			return tx, err
 		}); err != nil {
-		return nil, common.BigToAddress(nil), err
+		return nil, common.BytesToAddress(nil), err
 	}
 	return r, addr, nil
 }
