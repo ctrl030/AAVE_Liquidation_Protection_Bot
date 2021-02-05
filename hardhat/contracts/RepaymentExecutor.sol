@@ -2,13 +2,10 @@
 pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
-// import "hardhat/console.sol";
-
 import "../node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../flashloan/interfaces/IFlashLoanReceiver.sol";
 import "../interfaces/ILendingPool.sol";
 import "../interfaces/ILendingPoolAddressesProvider.sol";
-import "../protocol/libraries/types/DataTypes.sol";
 
 contract RepaymentExecutor is IFlashLoanReceiver {
   address constant ADDRESSES_PROVIDER_ADDRESS = 0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5;
@@ -18,20 +15,10 @@ contract RepaymentExecutor is IFlashLoanReceiver {
   ILendingPoolAddressesProvider immutable public override ADDRESSES_PROVIDER;
   ILendingPool immutable public override LENDING_POOL;
 
-  struct FlashParams {
-    address user;
-    address aToken;
-    address debtAsset;
-    uint sAmount;
-    uint vAmount;
-  }
-
   bytes32 constant EIP712DOMAIN_TYPEHASH = keccak256(
       "EIP712Domain(string name,string version,uint256 chainId,string salt)"
   );
-  bytes32 constant DELEGATE_TYPEHASH = keccak256(
-      "Delegate(address delegate)"
-  );
+  bytes32 constant DELEGATE_TYPEHASH = keccak256("Delegate(address delegate)");
 
   bytes32 immutable DOMAIN_SEPARATOR;
 
@@ -44,6 +31,15 @@ contract RepaymentExecutor is IFlashLoanReceiver {
 
   struct Delegate {
     address delegate;
+  }
+
+  struct FlashParams {
+    address user;  // Loan owner.
+    uint sAmount;  // Stable debt amount.
+    uint vAmount;  // Variable debt amount.
+    // packed encodes (the AToken, its underlying asset, and the collateral amount)
+    bytes packed;
+    bytes oneInchCalldata;
   }
 
   constructor() public {
@@ -67,27 +63,31 @@ contract RepaymentExecutor is IFlashLoanReceiver {
    *   and converting it to the loan asset type using 1inch.
    * @param _user the account owner
    * @param _signature signature of the certificate
-   * @param _cAsset the underlying collateral asset
+   * @param _sDebtToken variable debt token
+   * @param _vDebtToken stable debt token
    * @param _dAsset the underyling debt asset
-   * @param _oneInchSwapCalldata specifies a swap from the underyling asset of the collateral to the
-   *   debt asset with the sender as the owner of the assets and an amount of collateral matching
-   *   the _amount parameter.
+   * @param _packed contains encoded parameters used only after the flash loan callback. See the
+   *     FlashParams for a description of its contents.
+   * @param _oneInchCalldata swap calldata obtained from the 1inch API
    */
-  function execute(address _user, bytes memory _signature, address _cAsset, address _dAsset,
-      bytes memory _oneInchSwapCalldata) public {
+  function execute(address _user, bytes memory _signature, address _sDebtToken, address _vDebtToken,
+      address _dAsset, bytes memory _packed, bytes memory _oneInchCalldata) public {
     verifySignature(_user, _signature);
 
-    (uint sAmount, uint vAmount) = getDebtAmount(_dAsset, _user);
-    require(sAmount + vAmount > 0, "debt not found");
-    uint amount = sAmount + vAmount;
-    address aToken = toAToken(_cAsset);
-    FlashParams memory fp = FlashParams(_user, aToken, _dAsset, sAmount, vAmount);
-    bytes memory params = abi.encode(fp, _oneInchSwapCalldata);
+    uint debtAmount;
+    bytes memory params;
+    {
+      uint vAmount = IERC20(_vDebtToken).balanceOf(_user);
+      uint sAmount = IERC20(_sDebtToken).balanceOf(_user);
+      require(sAmount + vAmount > 0, "debt not found");
+      debtAmount = sAmount + vAmount;
+      params = abi.encode(FlashParams(_user, sAmount, vAmount, _packed, _oneInchCalldata));
+    }
 
     address[] memory assets = new address[](1);
     assets[0] = _dAsset;
     uint[] memory amounts = new uint[](1);
-    amounts[0] = amount;
+    amounts[0] = debtAmount;
     uint[] memory modes = new uint[](1);
     modes[0] = 0;
     LENDING_POOL.flashLoan(address(this), assets, amounts, modes, address(this), params, 0);
@@ -95,68 +95,57 @@ contract RepaymentExecutor is IFlashLoanReceiver {
 
   // Implements the flashloan callback.
   function executeOperation(
-      address[] calldata /* _assets */,
+      address[] calldata _assets,
       uint[] calldata _amounts,
       uint[] calldata _premiums,
       address /* _initiator */,
       bytes calldata _params) external override returns (bool) {
-    (FlashParams memory fp, bytes memory oneInchSwapCalldata)
-        = abi.decode(_params, (FlashParams, bytes));
-    require(IERC20(fp.debtAsset).approve(LENDING_POOL_ADDRESS, type(uint).max),
+    FlashParams memory fp = abi.decode(_params, (FlashParams));
+    IERC20 debtAsset = IERC20(_assets[0]);
+    uint flashLoanDebt = _amounts[0] + _premiums[0];
+    require(debtAsset.approve(LENDING_POOL_ADDRESS, _amounts[0]),
         'failed to approve the lending pool');
-    uint repaid = 0;
     if (fp.sAmount > 0) {
-      repaid += LENDING_POOL.repay(fp.debtAsset, fp.sAmount, 1, fp.user);
+      LENDING_POOL.repay(_assets[0], fp.sAmount, 1, fp.user);
     }
     if (fp.vAmount > 0) {
-      repaid += LENDING_POOL.repay(fp.debtAsset, fp.vAmount, 2, fp.user);
+      LENDING_POOL.repay(_assets[0], fp.vAmount, 2, fp.user);
     }
 
-    /* uint redeemed = */ redeemCollateral(fp.user, fp.aToken);
+    (address aToken, address cAsset, uint cAmount) = abi.decode(fp.packed,
+        (address, address, uint));
+
+    // Withdraws ATokens to the underlying asset.
+    // Temporarily transfers ATokens into this contract.
+    require(IERC20(aToken).transferFrom(fp.user, address(this), cAmount),
+        'collateral transfer failed');
+    // Withdraws the underyling asset (transforming the transferred ATokens).
+    require(cAmount == LENDING_POOL.withdraw(cAsset, cAmount, address(this)),
+        "withdrew less than the expected amount");
 
     // Swaps collateral to debt using 1inch.
-    /* uint amount = */ oneInchSwap(fp.aToken, oneInchSwapCalldata);
+    uint proceeds = oneInchSwap(cAsset, cAmount, fp.oneInchCalldata);
 
-    distributeProceeds(fp, _amounts[0] + _premiums[0]);
+    // Distributes the proceeds.
+    // Returns anything remaining back to the user.
+    require(debtAsset.transfer(fp.user, proceeds - flashLoanDebt),
+        "transferring remainder to user failed");
+    // Approves the lending pool to take payment.
+    require(debtAsset.approve(LENDING_POOL_ADDRESS, flashLoanDebt),
+        'failed to approve flash loan repayment');
 
     return true;
   }
 
-  function oneInchSwap(address _aToken, bytes memory _oneInchSwapCalldata) public returns (uint) {
-    address asset = underlyingAsset(_aToken);
-    // Grants 1inch approval to make the swap.
-    IERC20(asset).approve(ONE_INCH, type(uint).max);
+  function oneInchSwap(address _cAsset, uint _cAmount, bytes memory _oneInchSwapCalldata)
+      private returns (uint) {
+    IERC20(_cAsset).approve(ONE_INCH, _cAmount);  // Grants 1inch approval to make the swap.
     (bool s, bytes memory v) = ONE_INCH.call(_oneInchSwapCalldata);  // Performs the swap.
-    require(s, "one inch swap failed");
+    require(s, "1inch swap failed");
     return abi.decode(v, (uint));
   }
 
-  function redeemCollateral(address _user, address _aToken) private returns (uint) {
-    uint collateralAmount = IERC20(_aToken).balanceOf(_user);
-    require(IERC20(_aToken).transferFrom(_user, address(this), collateralAmount),
-        'collateral transfer failed');
-    address asset = underlyingAsset(_aToken);
-    // Withdraws aTokens to underlying asset so it can be used to repay the loan.
-    return LENDING_POOL.withdraw(asset, type(uint).max, address(this));
-  }
-
-  function underlyingAsset(address _aToken) public returns (address) {
-    (bool s, bytes memory v) = _aToken.call(abi.encodeWithSignature("UNDERLYING_ASSET_ADDRESS()"));
-    require(s, "failed to get underlying asset");
-    return abi.decode(v, (address));
-  }
-
-  function distributeProceeds(FlashParams memory _fp, uint _flashLoanAmount) private {
-    IERC20 asset = IERC20(_fp.debtAsset);
-    // Approves the lending pool to take payment.
-    require(asset.approve(LENDING_POOL_ADDRESS, _flashLoanAmount),
-        'failed to approve flash loan repayment');
-    uint remaining = asset.balanceOf(address(this)) - _flashLoanAmount;
-    // Transfers the remainder back to the user.
-    require(asset.transfer(_fp.user, remaining), "transferring remainder to user failed");
-  }
-
-  function verifySignature(address _user, bytes memory _signature) public view {
+  function verifySignature(address _user, bytes memory _signature) private view {
     bytes32 digest = keccak256(abi.encodePacked(
         "\x19\x01",
         DOMAIN_SEPARATOR,
@@ -178,7 +167,7 @@ contract RepaymentExecutor is IFlashLoanReceiver {
       v := byte(0, mload(add(_signature, 96)))
     }
 
-    // Version of signature should be 27 or 28, but 0 and 1 are also possible versions
+    // Version of the signature should be 27 or 28, but 0 and 1 are also possible.
     if (v < 27) {
       v += 27;
     }
@@ -198,24 +187,6 @@ contract RepaymentExecutor is IFlashLoanReceiver {
   }
 
   function hash(Delegate memory delegate) private pure returns (bytes32) {
-    return keccak256(abi.encode(
-        DELEGATE_TYPEHASH,
-        delegate.delegate
-    ));
-  }
-
-  function getDebtAmount(address _asset, address _user) private view returns (uint, uint) {
-    (IERC20 stableDebtToken, IERC20 variableDebtToken) = toDebtTokens(_asset);
-    return (stableDebtToken.balanceOf(_user), variableDebtToken.balanceOf(_user));
-  }
-
-  function toAToken(address _asset) private view returns (address) {
-    DataTypes.ReserveData memory data = LENDING_POOL.getReserveData(_asset);
-    return data.aTokenAddress;
-  }
-
-  function toDebtTokens(address _asset) private view returns (IERC20, IERC20) {
-    DataTypes.ReserveData memory data = LENDING_POOL.getReserveData(_asset);
-    return (IERC20(data.stableDebtTokenAddress), IERC20(data.variableDebtTokenAddress));
+    return keccak256(abi.encode(DELEGATE_TYPEHASH, delegate.delegate));
   }
 }
