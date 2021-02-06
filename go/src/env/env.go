@@ -22,8 +22,10 @@ var (
 type Params interface {
 	ETHURI() string
 	BotKey() string
-	UserKey() string
 	LendingPoolAddress() common.Address
+
+	// TODO(greatfilter): the parameters below are only used in testing. Factor this out?
+	UserKey() string
 	WETH9Address() common.Address
 	DaiAddress() common.Address
 }

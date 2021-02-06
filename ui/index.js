@@ -167,7 +167,7 @@ class ProtectionWidget extends React.Component {
     console.log('result=', result);
     if (!result.status) {
       document.getElementById('status-placeholder').innerHTML
-          = '<p style="color:red;">Approval failed. Check console logs.</p>';
+          = '<p style="color:red;text-align: center;">Approval failed. Check console logs.</p>';
     }
 
     let typedData = await getJSON(API.concat('cert'));
@@ -188,7 +188,7 @@ class ProtectionWidget extends React.Component {
     if (!resp.ok) {
       console.log("resp=", resp);
       document.getElementById('status-placeholder').innerHTML
-          = '<p style="color:red;">Signing failed. Check console logs.</p>';
+          = '<p style="color:red;text-align: center;">Signing failed. Check console logs.</p>';
     }
     document.getElementById('status-placeholder').innerHTML =
         '<div style="color:green;text-align: center;">Registration succeeded.</div>';
