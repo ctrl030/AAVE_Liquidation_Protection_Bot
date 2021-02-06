@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 
 	"clients"
 	"oneinch"
@@ -25,6 +26,7 @@ var (
 			"&disableEstimate=true"))
 	addressT abi.Type
 	uintT    abi.Type
+	bytesT   abi.Type
 )
 
 func init() {
@@ -36,6 +38,10 @@ func init() {
 	uintT, err = abi.NewType("uint256", "", nil)
 	if err != nil {
 		log.Fatalf("Error creating uint type: %v", err)
+	}
+	bytesT, err = abi.NewType("bytes", "", nil)
+	if err != nil {
+		log.Fatalf("Error creating bytes type: %v", err)
 	}
 }
 
@@ -78,12 +84,18 @@ func (e *Execution) Execute(ctx context.Context, c *clients.Client, r *Repayment
 				abi.Argument{Name: "_aToken", Type: addressT},
 				abi.Argument{Name: "_cAsset", Type: addressT},
 				abi.Argument{Name: "_cAmount", Type: uintT},
+				abi.Argument{Name: "_dAsset", Type: addressT},
+				abi.Argument{Name: "_oneInchCalldata", Type: bytesT},
 			}
-			packed, err := args.Pack(e.loan.AToken, e.loan.Collateral, e.cAmount)
+			packed, err := args.Pack(e.loan.AToken, e.loan.Collateral, e.cAmount, e.loan.Debt, e.calldata)
 			if err != nil {
 				return nil, fmt.Errorf("packing args: %w", err)
 			}
-			return r.Execute(txr, e.loan.User, e.signature, e.loan.StableDebt, e.loan.VariableDebt, e.loan.Debt, packed, e.calldata)
+			packedSig, err := c.SignAsBot(crypto.Keccak256Hash(packed))
+			if err != nil {
+				return nil, fmt.Errorf("signing packed args: %w", err)
+			}
+			return r.Execute(txr, e.loan.User, e.signature, e.loan.StableDebt, e.loan.VariableDebt, e.loan.Debt, packed, packedSig)
 		}); err != nil {
 		return err
 	}

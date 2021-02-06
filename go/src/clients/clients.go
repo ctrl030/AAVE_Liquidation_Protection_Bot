@@ -175,6 +175,11 @@ func (c *Client) ExecuteAsBot(ctx context.Context, desc string,
 	return c.Execute(ctx, c.bot, desc, t)
 }
 
+// SignAsBot signs the given hash using the bot's credentials.
+func (c *Client) SignAsBot(hash common.Hash) ([]byte, error) {
+	return c.bot.Sign(hash)
+}
+
 // Token returns an Erc20 token interface for the given token address.
 func (c *Client) Token(addr common.Address) (*erc20.Erc20, error) {
 	v, ok := c.tokens.Load(addr)

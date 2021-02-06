@@ -35,11 +35,17 @@ contract RepaymentExecutor is IFlashLoanReceiver {
 
   struct FlashParams {
     address user;  // Loan owner.
-    uint sAmount;  // Stable debt amount.
-    uint vAmount;  // Variable debt amount.
-    // packed encodes (the AToken, its underlying asset, and the collateral amount)
-    bytes packed;
-    bytes oneInchCalldata;
+    address bot;   // Bot address.
+    bytes botDelegationSignature;
+    // packedParams encodes (
+    //   the AToken,
+    //   its underlying asset,
+    //   the collateral amount,
+    //   the debt underlying asset,
+    //   1inchCalldata  // calldata obtained from the 1inch API
+    // )
+    bytes packedParams;
+    bytes packedParamsSignature;
   }
 
   constructor() public {
@@ -62,26 +68,26 @@ contract RepaymentExecutor is IFlashLoanReceiver {
    * @dev Repays a loan using a flash loan, then repays the flash loan by redeeming the collateral
    *   and converting it to the loan asset type using 1inch.
    * @param _user the account owner
-   * @param _signature signature of the certificate
+   * @param _botDelegationSignature signature of the bot delegation message
    * @param _sDebtToken variable debt token
    * @param _vDebtToken stable debt token
    * @param _dAsset the underyling debt asset
-   * @param _packed contains encoded parameters used only after the flash loan callback. See the
-   *     FlashParams for a description of its contents.
-   * @param _oneInchCalldata swap calldata obtained from the 1inch API
+   * @param _packedParams contains encoded parameters used only after the flash loan callback. See
+   *     the FlashParams for a description of its contents.
+   * @param _packedParamsSignature the bot's signature on _packedParams
    */
-  function execute(address _user, bytes memory _signature, address _sDebtToken, address _vDebtToken,
-      address _dAsset, bytes memory _packed, bytes memory _oneInchCalldata) public {
-    verifySignature(_user, _signature);
-
+  function execute(address _user, bytes memory _botDelegationSignature, address _sDebtToken,
+      address _vDebtToken, address _dAsset, bytes memory _packedParams,
+      bytes memory _packedParamsSignature) public {
     uint debtAmount;
     bytes memory params;
     {
-      uint vAmount = IERC20(_vDebtToken).balanceOf(_user);
       uint sAmount = IERC20(_sDebtToken).balanceOf(_user);
+      uint vAmount = IERC20(_vDebtToken).balanceOf(_user);
       require(sAmount + vAmount > 0, "debt not found");
       debtAmount = sAmount + vAmount;
-      params = abi.encode(FlashParams(_user, sAmount, vAmount, _packed, _oneInchCalldata));
+      params = abi.encode(FlashParams(
+        _user, msg.sender, _botDelegationSignature, _packedParams, _packedParamsSignature));
     }
 
     address[] memory assets = new address[](1);
@@ -94,26 +100,43 @@ contract RepaymentExecutor is IFlashLoanReceiver {
   }
 
   // Implements the flashloan callback.
+  //
+  // NB: this is a public function and can be called by anyone. The particular danger is that for
+  // this contract to work, it must have access to the user's ATokens. Security is ensured by
+  // checking that the user trusts the bot that all parameters are signed by the bot.
+  //
+  // The debt amounts are not signed by the bot because the bot operates off-chain. These amounts
+  // are read on-chain so they can't be easily tampered with by an attacker.
   function executeOperation(
       address[] calldata _assets,
       uint[] calldata _amounts,
       uint[] calldata _premiums,
       address /* _initiator */,
       bytes calldata _params) external override returns (bool) {
-    FlashParams memory fp = abi.decode(_params, (FlashParams));
-    IERC20 debtAsset = IERC20(_assets[0]);
-    uint flashLoanDebt = _amounts[0] + _premiums[0];
-    require(debtAsset.approve(LENDING_POOL_ADDRESS, _amounts[0]),
-        'failed to approve the lending pool');
-    if (fp.sAmount > 0) {
-      LENDING_POOL.repay(_assets[0], fp.sAmount, 1, fp.user);
-    }
-    if (fp.vAmount > 0) {
-      LENDING_POOL.repay(_assets[0], fp.vAmount, 2, fp.user);
-    }
+    require(_assets.length == 1);
+    require(_amounts[0] > 0, "flash loan with 0 amount?");
 
-    (address aToken, address cAsset, uint cAmount) = abi.decode(fp.packed,
-        (address, address, uint));
+    FlashParams memory fp = abi.decode(_params, (FlashParams));
+    verifySignatures(fp);
+
+    {
+      // Repays the debts.
+      IERC20 debtAsset = IERC20(_assets[0]);
+      require(debtAsset.approve(LENDING_POOL_ADDRESS, _amounts[0]),
+          'failed to approve the lending pool');
+      (uint sAmount, uint vAmount) = debtAmounts(fp.user, _assets[0]);
+      require(sAmount + vAmount == _amounts[0], "loan amount did not match debt");
+      if (sAmount > 0) {
+        LENDING_POOL.repay(_assets[0], sAmount, 1, fp.user);
+      }
+      if (vAmount > 0) {
+        LENDING_POOL.repay(_assets[0], vAmount, 2, fp.user);
+      }
+    }
+    (address aToken, address cAsset, uint cAmount, address dAsset, bytes memory oneInchCalldata)
+        = abi.decode(fp.packedParams, (address, address, uint, address, bytes));
+    require(dAsset == _assets[0], "debt asset didn't match");
+    uint flashLoanDebt = _amounts[0] + _premiums[0];
 
     // Withdraws ATokens to the underlying asset.
     // Temporarily transfers ATokens into this contract.
@@ -124,8 +147,9 @@ contract RepaymentExecutor is IFlashLoanReceiver {
         "withdrew less than the expected amount");
 
     // Swaps collateral to debt using 1inch.
-    uint proceeds = oneInchSwap(cAsset, cAmount, fp.oneInchCalldata);
+    uint proceeds = oneInchSwap(cAsset, cAmount, oneInchCalldata);
 
+    IERC20 debtAsset = IERC20(dAsset);
     // Distributes the proceeds.
     // Returns anything remaining back to the user.
     require(debtAsset.transfer(fp.user, proceeds - flashLoanDebt),
@@ -145,13 +169,27 @@ contract RepaymentExecutor is IFlashLoanReceiver {
     return abi.decode(v, (uint));
   }
 
-  function verifySignature(address _user, bytes memory _signature) private view {
+  function verifySignatures(FlashParams memory fp) private view {
+    // Verifies that the user has trusted the bot.
+    verifyBotDelegationSignature(fp.user, fp.bot, fp.botDelegationSignature);
+    // Verifies that the bot produced packed parameters.
+    verifyPackedParams(fp);
+  }
+
+  function verifyBotDelegationSignature(address _user, address _bot, bytes memory _signature)
+      private view {
     bytes32 digest = keccak256(abi.encodePacked(
         "\x19\x01",
         DOMAIN_SEPARATOR,
-        hash(Delegate({ delegate: msg.sender }))
+        hash(Delegate({ delegate: _bot }))
     ));
     require(recoverSigner(digest, _signature) == _user, "signer did not match");
+  }
+
+  function verifyPackedParams(FlashParams memory fp) private pure {
+    bytes32 digest = keccak256(fp.packedParams);
+    require(recoverSigner(digest, fp.packedParamsSignature) == fp.bot,
+        "packed parameters not signed by bot");
   }
 
   function recoverSigner(bytes32 digest, bytes memory _signature) private pure returns (address) {
@@ -188,5 +226,13 @@ contract RepaymentExecutor is IFlashLoanReceiver {
 
   function hash(Delegate memory delegate) private pure returns (bytes32) {
     return keccak256(abi.encode(DELEGATE_TYPEHASH, delegate.delegate));
+  }
+
+
+  function debtAmounts(address _user, address _asset) private view returns (uint, uint) {
+    DataTypes.ReserveData memory data = LENDING_POOL.getReserveData(_asset);
+    uint sAmount = IERC20(data.stableDebtTokenAddress).balanceOf(_user);
+    uint vAmount = IERC20(data.variableDebtTokenAddress).balanceOf(_user);
+    return (sAmount, vAmount);
   }
 }
